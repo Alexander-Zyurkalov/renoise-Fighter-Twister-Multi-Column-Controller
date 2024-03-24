@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RenoiseScriptingTool doc_version="1">
+    <Id>com.zyurkalov.MyBasicTool</Id>
+    <Name>MyBasic Tool</Name>
+    <Version>1.0.0</Version>
+    <Author>Zyurkalov</Author>
+    <Description>This is a basic Renoise tool that does nothing.</Description>
+    <Category>Zyurkalov</Category>
+    <Description>Simple tool</Description>
+</RenoiseScriptingTool>
+
