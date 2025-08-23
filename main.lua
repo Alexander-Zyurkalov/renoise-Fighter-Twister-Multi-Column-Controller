@@ -1,9 +1,7 @@
--- MIDI Monitor Tool for Renoise
--- Shows a window to select MIDI device and display last 3 events
--- Controls instrument number with MIDI Fighter Twister and sends feedback
+-- MIDI Fighter Twister Instrument Controller for Renoise
+-- Controls instrument number with CC12 Channel 1 and sends feedback
 
 -- Global variables
-local dialog = nil
 local midi_device = nil
 local midi_output_device = nil
 
@@ -12,9 +10,7 @@ local CONTROL_CC = 12
 local CONTROL_CHANNEL = 1
 local INCREASE_VALUE = 65
 local DECREASE_VALUE = 63
-
--- UI elements
-local device_popup = nil
+local DEVICE_NAME = "Midi Fighter Twister"
 
 -- Function to send MIDI feedback
 local function send_midi_feedback(value)
@@ -60,7 +56,6 @@ local function midi_callback(message)
     local data1 = message[2] or 0
     local data2 = message[3] or 0
 
-    local msg_type = "Unknown"
     local channel = (status % 16) + 1
     local command = status - (status % 16)
 
@@ -73,18 +68,9 @@ local function midi_callback(message)
     end
 end
 
--- Get available MIDI devices
-local function get_midi_devices()
-    local devices = {"None"}
-    local available_devices = renoise.Midi.available_input_devices()
-    for i = 1, table.getn(available_devices) do
-        table.insert(devices, available_devices[i])
-    end
-    return devices
-end
-
--- Device selection handler
-local function on_device_changed()
+-- Function to initialize MIDI devices
+local function initialize_midi_devices()
+    -- Close existing devices
     if midi_device then
         midi_device:close()
         midi_device = nil
@@ -94,78 +80,34 @@ local function on_device_changed()
         midi_output_device = nil
     end
 
+    -- Find and open MIDI Fighter Twister
+    local available_input_devices = renoise.Midi.available_input_devices()
+    local available_output_devices = renoise.Midi.available_output_devices()
 
-    local selected_index = device_popup.value
-    if selected_index > 1 then
-        local available_devices = renoise.Midi.available_input_devices()
-        local device_name = available_devices[selected_index - 1]
-        midi_device = renoise.Midi.create_input_device(device_name, midi_callback)
+    -- Open input device
+    for i = 1, table.getn(available_input_devices) do
+        if available_input_devices[i] == DEVICE_NAME then
+            midi_device = renoise.Midi.create_input_device(DEVICE_NAME, midi_callback)
+            break
+        end
+    end
 
-        local available_output_devices = renoise.Midi.available_output_devices()
-        for i = 1, table.getn(available_output_devices) do
-            if available_output_devices[i] == device_name then
-                midi_output_device = renoise.Midi.create_output_device(device_name)
-                break
-            end
+    -- Open output device
+    for i = 1, table.getn(available_output_devices) do
+        if available_output_devices[i] == DEVICE_NAME then
+            midi_output_device = renoise.Midi.create_output_device(DEVICE_NAME)
+            break
         end
     end
 end
 
--- Create the dialog
-local function create_dialog()
-    local vb = renoise.ViewBuilder()
+-- Initialize devices when tool loads
+initialize_midi_devices()
 
-    local devices = get_midi_devices()
-
-    device_popup = vb:popup {
-        items = devices,
-        value = 1,
-        notifier = on_device_changed,
-        width = 200
-    }
-
-    local content = vb:column {
-        margin = 10,
-        spacing = 5,
-
-        vb:row {
-            vb:text { text = "MIDI Device:" },
-            device_popup
-        },
-
-        vb:space { height = 10 },
-    }
-
-    return vb:column { content }
-end
-
--- Show the dialog
-local function show_dialog()
-    if dialog and dialog.visible then
-        dialog:show()
-        return
-    end
-
-    dialog = renoise.app():show_custom_dialog(
-            "MIDI Monitor",
-            create_dialog(),
-            function()
-                if midi_device then
-                    midi_device:close()
-                    midi_device = nil
-                end
-                if midi_output_device then
-                    midi_output_device:close()
-                    midi_output_device = nil
-                end
-            end
-    )
-end
-
--- Add menu entry
+-- Add menu entry to reconnect if needed
 renoise.tool():add_menu_entry {
-    name = "Main Menu:Tools:MIDI Monitor...",
-    invoke = show_dialog
+    name = "Main Menu:Tools:Reconnect MIDI Fighter Twister",
+    invoke = initialize_midi_devices
 }
 
 -- Cleanup when tool is unloaded
