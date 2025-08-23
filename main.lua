@@ -4,6 +4,10 @@
 -- Global variables
 local midi_device = nil
 local midi_output_device = nil
+local observers_attached = false
+local position_timer = nil
+local last_edit_pos = nil
+local last_note_column = nil
 
 -- MIDI control settings
 local CONTROL_CC = 12
@@ -12,7 +16,26 @@ local INCREASE_VALUE = 65
 local DECREASE_VALUE = 63
 local DEVICE_NAME = "Midi Fighter Twister"
 
--- Function to send MIDI feedback
+-- Function to get current instrument value
+local function get_current_instrument()
+    local song = renoise.song()
+    local current_line = song.selected_line
+
+    if not current_line then
+        return 0
+    end
+
+    local note_columns = current_line.note_columns
+    local selected_column = song.selected_note_column_index
+
+    if selected_column > 0 and selected_column <= table.getn(note_columns) then
+        local note_column = note_columns[selected_column]
+        return note_column.instrument_value
+    end
+
+    return 0
+end
+
 local function send_midi_feedback(value)
     if midi_output_device then
         local status_byte = 176 + (CONTROL_CHANNEL - 1)
@@ -20,6 +43,12 @@ local function send_midi_feedback(value)
         local message = {status_byte, CONTROL_CC, clamped_value}
         midi_output_device:send(message)
     end
+end
+
+-- Function to update MIDI controller with current instrument
+local function update_controller()
+    local current_instrument = get_current_instrument()
+    send_midi_feedback(current_instrument)
 end
 
 -- Function to modify instrument number
@@ -68,6 +97,90 @@ local function midi_callback(message)
     end
 end
 
+-- Timer function to check for edit position changes
+local function check_position_changes()
+    local song = renoise.song()
+    local current_pos = song.transport.edit_pos
+    local current_note_column = song.selected_note_column_index
+
+    -- Check if position or note column changed
+    if not last_edit_pos or
+            last_edit_pos.line ~= current_pos.line or
+            last_edit_pos.sequence ~= current_pos.sequence or
+            last_note_column ~= current_note_column then
+
+        last_edit_pos = {
+            line = current_pos.line,
+            sequence = current_pos.sequence
+        }
+        last_note_column = current_note_column
+        update_controller()
+    end
+end
+
+-- Function to start position monitoring
+local function start_position_timer()
+    if position_timer then
+        return
+    end
+
+    -- Check position every 100ms
+    position_timer = renoise.tool():add_timer(check_position_changes, 500)
+end
+
+-- Function to stop position monitoring
+local function stop_position_timer()
+    if position_timer then
+        renoise.tool():remove_timer(check_position_changes)
+        position_timer = nil
+    end
+end
+-- Function to attach selection observers
+local function attach_observers()
+    if observers_attached then
+        return
+    end
+
+    local song = renoise.song()
+
+    -- Track selection changed
+    if song.selected_track_index_observable:has_notifier(update_controller) == false then
+        song.selected_track_index_observable:add_notifier(update_controller)
+    end
+
+    -- Pattern selection changed
+    if song.selected_pattern_index_observable:has_notifier(update_controller) == false then
+        song.selected_pattern_index_observable:add_notifier(update_controller)
+    end
+
+    -- Start position timer (handles line position and note column changes)
+    start_position_timer()
+
+    observers_attached = true
+end
+
+-- Function to detach selection observers
+local function detach_observers()
+    if not observers_attached then
+        return
+    end
+
+    local song = renoise.song()
+
+    -- Remove observers
+    if song.selected_track_index_observable:has_notifier(update_controller) then
+        song.selected_track_index_observable:remove_notifier(update_controller)
+    end
+
+    if song.selected_pattern_index_observable:has_notifier(update_controller) then
+        song.selected_pattern_index_observable:remove_notifier(update_controller)
+    end
+
+    -- Stop position timer
+    stop_position_timer()
+
+    observers_attached = false
+end
 -- Function to initialize MIDI devices
 local function initialize_midi_devices()
     -- Close existing devices
@@ -79,6 +192,9 @@ local function initialize_midi_devices()
         midi_output_device:close()
         midi_output_device = nil
     end
+
+    -- Detach old observers
+    detach_observers()
 
     -- Find and open MIDI Fighter Twister
     local available_input_devices = renoise.Midi.available_input_devices()
@@ -99,6 +215,12 @@ local function initialize_midi_devices()
             break
         end
     end
+
+    -- Attach observers and update controller
+    if midi_output_device then
+        attach_observers()
+        update_controller() -- Send current instrument value immediately
+    end
 end
 
 -- Initialize devices when tool loads
@@ -112,6 +234,7 @@ renoise.tool():add_menu_entry {
 
 -- Cleanup when tool is unloaded
 renoise.tool().app_release_document_observable:add_notifier(function()
+    detach_observers()
     if midi_device then
         midi_device:close()
         midi_device = nil
