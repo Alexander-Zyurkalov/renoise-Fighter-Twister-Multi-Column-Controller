@@ -120,17 +120,17 @@ end
 
 -- Function to start position monitoring
 local function start_position_timer()
-    if position_timer then
+    if  renoise.tool():has_timer(check_position_changes) then
         return
     end
 
-    -- Check position every 100ms
+    -- Check position every 500ms
     position_timer = renoise.tool():add_timer(check_position_changes, 500)
 end
 
 -- Function to stop position monitoring
 local function stop_position_timer()
-    if position_timer then
+    if  renoise.tool():has_timer(check_position_changes) then
         renoise.tool():remove_timer(check_position_changes)
         position_timer = nil
     end
