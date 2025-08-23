@@ -6,8 +6,6 @@
 local dialog = nil
 local midi_device = nil
 local midi_output_device = nil
-local midi_events = {}
-local MAX_EVENTS = 3
 
 -- MIDI control settings
 local CONTROL_CC = 12
@@ -17,9 +15,6 @@ local DECREASE_VALUE = 63
 
 -- UI elements
 local device_popup = nil
-local event_text_1 = nil
-local event_text_2 = nil
-local event_text_3 = nil
 
 -- Function to send MIDI feedback
 local function send_midi_feedback(value)
@@ -76,39 +71,6 @@ local function midi_callback(message)
             modify_instrument(-1)
         end
     end
-
-    if command == 128 then
-        msg_type = string.format("Note Off Ch%d: Note %d, Vel %d", channel, data1, data2)
-    elseif command == 144 then
-        if data2 == 0 then
-            msg_type = string.format("Note Off Ch%d: Note %d, Vel %d", channel, data1, data2)
-        else
-            msg_type = string.format("Note On Ch%d: Note %d, Vel %d", channel, data1, data2)
-        end
-    elseif command == 176 then
-        msg_type = string.format("CC Ch%d: CC %d, Val %d", channel, data1, data2)
-    elseif command == 192 then
-        msg_type = string.format("Program Change Ch%d: %d", channel, data1)
-    elseif command == 224 then
-        local pitch_value = data1 + (data2 * 128)
-        msg_type = string.format("Pitch Bend Ch%d: %d", channel, pitch_value)
-    else
-        msg_type = string.format("Status: %d, Data1: %d, Data2: %d", status, data1, data2)
-    end
-
-    local timestamp = os.date("%H:%M:%S")
-    local event_string = string.format("[%s] %s", timestamp, msg_type)
-
-    table.insert(midi_events, 1, event_string)
-    if table.getn(midi_events) > MAX_EVENTS then
-        table.remove(midi_events, MAX_EVENTS + 1)
-    end
-
-    if dialog and dialog.visible then
-        event_text_1.text = midi_events[1] or ""
-        event_text_2.text = midi_events[2] or ""
-        event_text_3.text = midi_events[3] or ""
-    end
 end
 
 -- Get available MIDI devices
@@ -132,12 +94,6 @@ local function on_device_changed()
         midi_output_device = nil
     end
 
-    midi_events = {}
-    if dialog and dialog.visible then
-        event_text_1.text = ""
-        event_text_2.text = ""
-        event_text_3.text = ""
-    end
 
     local selected_index = device_popup.value
     if selected_index > 1 then
@@ -168,24 +124,6 @@ local function create_dialog()
         width = 200
     }
 
-    event_text_1 = vb:text {
-        text = "",
-        font = "mono",
-        width = 400
-    }
-
-    event_text_2 = vb:text {
-        text = "",
-        font = "mono",
-        width = 400
-    }
-
-    event_text_3 = vb:text {
-        text = "",
-        font = "mono",
-        width = 400
-    }
-
     local content = vb:column {
         margin = 10,
         spacing = 5,
@@ -196,30 +134,6 @@ local function create_dialog()
         },
 
         vb:space { height = 10 },
-
-        vb:text { text = "Last 3 MIDI Events:", style = "strong" },
-        vb:space { height = 5 },
-
-        vb:column {
-            spacing = 2,
-            event_text_1,
-            event_text_2,
-            event_text_3
-        },
-
-        vb:space { height = 10 },
-
-        vb:text { text = "Control: CC12 Ch1 controls instrument number (with feedback)", style = "disabled" },
-
-        vb:button {
-            text = "Clear Events",
-            notifier = function()
-                midi_events = {}
-                event_text_1.text = ""
-                event_text_2.text = ""
-                event_text_3.text = ""
-            end
-        }
     }
 
     return vb:column { content }
