@@ -14,7 +14,15 @@ local CONTROL_CC = 12
 local CONTROL_CHANNEL = 1
 local INCREASE_VALUE = 65
 local DECREASE_VALUE = 63
+local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
 local DEVICE_NAME = "Midi Fighter Twister"
+local LAST_CONTROL = {
+    control_cc = CONTROL_CC,
+    command = 0,
+    value = 0,
+    count = 0
+}
+
 
 -- Function to get current instrument value and note column
 local function get_current_instrument()
@@ -44,7 +52,7 @@ local function send_midi_feedback(value)
     if midi_output_device then
         local status_byte = 176 + (CONTROL_CHANNEL - 1)
         local clamped_value = math.min(127, value)
-        local message = {status_byte, CONTROL_CC, clamped_value}
+        local message = { status_byte, CONTROL_CC, clamped_value }
         midi_output_device:send(message)
     end
 end
@@ -73,6 +81,27 @@ local function modify_instrument(direction)
     note_column.instrument_value = new_instrument
     send_midi_feedback(new_instrument)
 end
+local function is_ready_to_modify(command, channel, value)
+    local prev_count =  LAST_CONTROL.count
+    if LAST_CONTROL.command == command and LAST_CONTROL.control_cc == CONTROL_CC and LAST_CONTROL.value == value then
+        LAST_CONTROL.count = LAST_CONTROL.count + 1
+        if LAST_CONTROL.count > NUMBER_OF_STEPS_TO_CHANGE_VALUE then
+            LAST_CONTROL.count = 1
+        end
+    else
+        LAST_CONTROL.command = command
+        LAST_CONTROL.control_cc = CONTROL_CC
+        LAST_CONTROL.value = value
+        LAST_CONTROL.count = 1
+        --    TODO also add channel
+    end
+    if command == 176 and channel == CONTROL_CHANNEL and value == CONTROL_CC and LAST_CONTROL.count == NUMBER_OF_STEPS_TO_CHANGE_VALUE then
+        return true
+    else
+        return false
+    end
+
+end
 
 -- MIDI event handler
 local function midi_callback(message)
@@ -82,8 +111,7 @@ local function midi_callback(message)
 
     local channel = (status % 16) + 1
     local command = status - (status % 16)
-
-    if command == 176 and channel == CONTROL_CHANNEL and data1 == CONTROL_CC then
+    if is_ready_to_modify(command, channel, data1) then
         if data2 == INCREASE_VALUE then
             modify_instrument(1)
         elseif data2 == DECREASE_VALUE then
@@ -95,7 +123,7 @@ end
 
 -- Function to start position monitoring
 local function start_position_timer()
-    if  renoise.tool():has_timer(update_controller) then
+    if renoise.tool():has_timer(update_controller) then
         return
     end
 
@@ -105,7 +133,7 @@ end
 
 -- Function to stop position monitoring
 local function stop_position_timer()
-    if  renoise.tool():has_timer(update_controller) then
+    if renoise.tool():has_timer(update_controller) then
         renoise.tool():remove_timer(update_controller)
         position_timer = nil
     end
