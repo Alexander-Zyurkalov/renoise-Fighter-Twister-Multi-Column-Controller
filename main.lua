@@ -126,18 +126,6 @@ local COLUMN_PARAMS = {
         absent_value = 0,
         default_value = 0
     },
-    --effect_number = {
-    --    getter = function(effect_column)
-    --        return effect_column.number_value
-    --    end,
-    --    setter = function(effect_column, value, effect_column_index)
-    --        effect_column.number_value = value
-    --    end,
-    --    min_value = 0,
-    --    max_value = 255,
-    --    absent_value = 0,
-    --    default_value = 0,
-    --},
     effect_amount = {
         getter = function(effect_column)
             return effect_column.amount_value
@@ -457,14 +445,37 @@ local function get_current_column_value(column_type, column_index, is_effect_col
     return 0, nil
 end
 
+-- Function to map column value to MIDI range (0-127)
+local function map_to_midi_range(column_type, current_value)
+    local params = COLUMN_PARAMS[column_type]
+    if not params then
+        return 0
+    end
+
+    local range = params.max_value - params.min_value
+    if range <= 0 then
+        return 0
+    end
+
+    -- Map the value from column range to MIDI range (0-127)
+    local normalized_value = (current_value - params.min_value) / range
+    local midi_value = math.floor(normalized_value * 127 + 0.5) -- Round to nearest integer
+
+    -- Clamp to MIDI range
+    return math.max(0, math.min(127, midi_value))
+end
+
 -- Function to update MIDI controller for a specific column type and column index
 local function update_controller_for_column(column_type, column_index, cc, is_effect_column)
     local current_value, _ = get_current_column_value(column_type, column_index, is_effect_column)
     local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
     local color_value = get_column_color(column_type, has_value)
 
-    -- Send both column value and color
-    send_midi_feedback(cc, current_value)
+    -- Map column value to MIDI range (0-127)
+    local midi_value = map_to_midi_range(column_type, current_value)
+
+    -- Send both mapped column value and color
+    send_midi_feedback(cc, midi_value)
     send_color_feedback(cc, color_value)
 end
 
@@ -506,8 +517,9 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
 
     params.setter(column, new_value, column_index)
 
-    -- Send feedback
-    send_midi_feedback(cc, new_value)
+    -- Send feedback with mapped MIDI value
+    local midi_value = map_to_midi_range(column_type, new_value)
+    send_midi_feedback(cc, midi_value)
     local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
     local color_value = get_column_color(column_type, has_value)
     send_color_feedback(cc, color_value)
