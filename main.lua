@@ -16,13 +16,13 @@ local INCREASE_VALUE = 65
 local DECREASE_VALUE = 63
 local DEVICE_NAME = "Midi Fighter Twister"
 
--- Function to get current instrument value
+-- Function to get current instrument value and note column
 local function get_current_instrument()
     local song = renoise.song()
     local current_line = song.selected_line
 
     if not current_line then
-        return 0
+        return 0, nil
     end
 
     local note_columns = current_line.note_columns
@@ -34,10 +34,10 @@ local function get_current_instrument()
         if instrument_value == 255 then
             instrument_value = 0
         end
-        return instrument_value
+        return instrument_value, note_column
     end
 
-    return 0
+    return 0, nil
 end
 
 local function send_midi_feedback(value)
@@ -51,36 +51,27 @@ end
 
 -- Function to update MIDI controller with current instrument
 local function update_controller()
-    local current_instrument = get_current_instrument()
+    local current_instrument, _ = get_current_instrument()
     send_midi_feedback(current_instrument)
 end
 
 -- Function to modify instrument number
 local function modify_instrument(direction)
-    local song = renoise.song()
-    local current_line = song.selected_line
+    local current_instrument, note_column = get_current_instrument()
 
-    if not current_line then
+    if not note_column then
         return
     end
 
-    local note_columns = current_line.note_columns
-    local selected_column = song.selected_note_column_index
-
-    if selected_column > 0 and selected_column <= table.getn(note_columns) then
-        local note_column = note_columns[selected_column]
-        local current_instrument = note_column.instrument_value
-
-        local new_instrument = current_instrument
-        if direction > 0 then
-            new_instrument = math.min(254, current_instrument + 1)
-        else
-            new_instrument = math.max(0, current_instrument - 1)
-        end
-
-        note_column.instrument_value = new_instrument
-        send_midi_feedback(new_instrument)
+    local new_instrument = current_instrument
+    if direction > 0 then
+        new_instrument = math.min(254, current_instrument + 1)
+    else
+        new_instrument = math.max(0, current_instrument - 1)
     end
+
+    note_column.instrument_value = new_instrument
+    send_midi_feedback(new_instrument)
 end
 
 -- MIDI event handler
