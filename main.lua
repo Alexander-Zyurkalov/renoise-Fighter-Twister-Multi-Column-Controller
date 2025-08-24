@@ -41,9 +41,34 @@ local function get_current_instrument()
     if selected_column > 0 and selected_column <= table.getn(note_columns) then
         local note_column = note_columns[selected_column]
         local instrument_value = note_column.instrument_value
+
         if instrument_value == 255 then
-            instrument_value = 0
+            -- Look back through previous lines to find a non-255 value
+            local current_pattern = song.selected_pattern
+            local current_track = current_pattern.tracks[song.selected_track_index]
+            local current_line_index = song.selected_line_index
+
+            -- Search backwards from the previous line
+            for line_index = current_line_index - 1, 1, -1 do
+                local line = current_track:line(line_index)
+                if line and line.note_columns and selected_column <= table.getn(line.note_columns) then
+                    local prev_note_column = line.note_columns[selected_column]
+                    if prev_note_column then
+                        local prev_instrument_value = prev_note_column.instrument_value
+                        if prev_instrument_value ~= 255 then
+                            instrument_value = prev_instrument_value
+                            break
+                        end
+                    end
+                end
+            end
+
+            -- If we still have 255 after looking back (or are at the top), set to 0
+            if instrument_value == 255 then
+                instrument_value = 0
+            end
         end
+
         return instrument_value, note_column
     end
 
