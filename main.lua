@@ -30,7 +30,11 @@ local function get_current_instrument()
 
     if selected_column > 0 and selected_column <= table.getn(note_columns) then
         local note_column = note_columns[selected_column]
-        return note_column.instrument_value
+        local instrument_value = note_column.instrument_value
+        if instrument_value == 255 then
+            instrument_value = 0
+        end
+        return instrument_value
     end
 
     return 0
