@@ -16,13 +16,15 @@ local INCREASE_VALUE = 65
 local DECREASE_VALUE = 63
 local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
 local DEVICE_NAME = "Midi Fighter Twister"
-local LAST_CONTROL = {
-    control_cc = CONTROL_CC,
+
+-- Improved last control state tracking (following Lua conventions)
+local last_control = {
     command = 0,
+    channel = 0,
+    control_cc = 0,
     value = 0,
     count = 0
 }
-
 
 -- Function to get current instrument value and note column
 local function get_current_instrument()
@@ -81,26 +83,33 @@ local function modify_instrument(direction)
     note_column.instrument_value = new_instrument
     send_midi_feedback(new_instrument)
 end
-local function is_ready_to_modify(command, channel, value)
-    local prev_count =  LAST_CONTROL.count
-    if LAST_CONTROL.command == command and LAST_CONTROL.control_cc == CONTROL_CC and LAST_CONTROL.value == value then
-        LAST_CONTROL.count = LAST_CONTROL.count + 1
-        if LAST_CONTROL.count > NUMBER_OF_STEPS_TO_CHANGE_VALUE then
-            LAST_CONTROL.count = 1
+
+local function is_ready_to_modify(command, channel, control_cc)
+    -- Check if this is the same message as before
+    local is_same_message = (last_control.command == command and
+            last_control.channel == channel and
+            last_control.control_cc == control_cc)
+
+    if is_same_message then
+        -- Increment counter for consecutive identical messages
+        last_control.count = last_control.count + 1
+        -- Reset counter if it exceeds the threshold
+        if last_control.count > NUMBER_OF_STEPS_TO_CHANGE_VALUE then
+            last_control.count = 1
         end
     else
-        LAST_CONTROL.command = command
-        LAST_CONTROL.control_cc = CONTROL_CC
-        LAST_CONTROL.value = value
-        LAST_CONTROL.count = 1
-        --    TODO also add channel
-    end
-    if command == 176 and channel == CONTROL_CHANNEL and value == CONTROL_CC and LAST_CONTROL.count == NUMBER_OF_STEPS_TO_CHANGE_VALUE then
-        return true
-    else
-        return false
+        -- Store new message state and reset counter
+        last_control.command = command
+        last_control.channel = channel
+        last_control.control_cc = control_cc
+        last_control.count = 1
     end
 
+    -- Check if we should modify: correct CC message on correct channel with enough repetitions
+    return (command == 176 and
+            channel == CONTROL_CHANNEL and
+            control_cc == CONTROL_CC and
+            last_control.count == NUMBER_OF_STEPS_TO_CHANGE_VALUE)
 end
 
 -- MIDI event handler
@@ -111,6 +120,7 @@ local function midi_callback(message)
 
     local channel = (status % 16) + 1
     local command = status - (status % 16)
+
     if is_ready_to_modify(command, channel, data1) then
         if data2 == INCREASE_VALUE then
             modify_instrument(1)
@@ -120,14 +130,13 @@ local function midi_callback(message)
     end
 end
 
-
 -- Function to start position monitoring
 local function start_position_timer()
     if renoise.tool():has_timer(update_controller) then
         return
     end
 
-    -- Check position every 500ms
+    -- Check position every 1000ms
     position_timer = renoise.tool():add_timer(update_controller, 1000)
 end
 
@@ -138,6 +147,7 @@ local function stop_position_timer()
         position_timer = nil
     end
 end
+
 -- Function to attach selection observers
 local function attach_observers()
     if observers_attached then
@@ -184,6 +194,7 @@ local function detach_observers()
 
     observers_attached = false
 end
+
 -- Function to initialize MIDI devices
 local function initialize_midi_devices()
     -- Close existing devices
