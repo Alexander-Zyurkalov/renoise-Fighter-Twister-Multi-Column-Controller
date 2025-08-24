@@ -1,6 +1,6 @@
 -- MIDI Fighter Twister Multi-Column Controller for Renoise
--- Controls instrument, volume, pan, delay, and FX columns with feedback
--- Dynamically assigns CCs to control ALL visible note columns
+-- Controls instrument, volume, pan, delay, FX columns, and effect columns with feedback
+-- Dynamically assigns CCs to control ALL visible note columns and effect columns
 -- Sends color feedback: Green if value exists, Blue if empty
 
 -- Global variables
@@ -22,13 +22,15 @@ local DEVICE_NAME = "Midi Fighter Twister"
 local NOTE_COLOR = 50        -- Note values (to differentiate note column boundaries)
 local EMPTY_NOTE_COLOR = 30        -- Note values (to differentiate note column boundaries)
 local OTHER_PARAM_COLOR = 70 -- Other parameters (instrument, volume, pan, delay, fx)
+local EFFECT_COLOR = 90      -- Effect columns (effect number/amount)
+local EMPTY_EFFECT_COLOR = 20 -- Empty effect columns
 local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3}
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
--- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx", note_column_index = 1..N }
+-- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount", note_column_index = 1..N, effect_column_index = 1..N }
 local COLUMN_CONTROLS = {}
 
 -- Column parameter configuration hash-map
@@ -123,6 +125,49 @@ local COLUMN_PARAMS = {
         max_value = 255,
         absent_value = 0,
         default_value = 0
+    },
+    --effect_number = {
+    --    getter = function(effect_column)
+    --        return effect_column.number_value
+    --    end,
+    --    setter = function(effect_column, value, effect_column_index)
+    --        effect_column.number_value = value
+    --    end,
+    --    min_value = 0,
+    --    max_value = 255,
+    --    absent_value = 0,
+    --    default_value = 0,
+    --},
+    effect_amount = {
+        getter = function(effect_column)
+            return effect_column.amount_value
+        end,
+        setter = function(effect_column, value, effect_column_index)
+            effect_column.amount_value = value
+            -- Also set effect number from previous effects if current is empty
+            if effect_column.number_value == 0 then
+                local song = renoise.song()
+                local current_line_index = song.selected_line_index
+                local current_pattern = song.selected_pattern
+                local current_track = current_pattern.tracks[song.selected_track_index]
+
+                -- Search backwards for number_value in this same effect column
+                for line_index = current_line_index - 1, 1, -1 do
+                    local line = current_track:line(line_index)
+                    if line and line.effect_columns and effect_column_index <= table.getn(line.effect_columns) then
+                        local prev_effect_column = line.effect_columns[effect_column_index]
+                        if prev_effect_column and prev_effect_column.number_value ~= 0 then
+                            effect_column.number_value = prev_effect_column.number_value
+                            break
+                        end
+                    end
+                end
+            end
+        end,
+        min_value = 0,
+        max_value = 255,
+        absent_value = 0,
+        default_value = 0
     }
 }
 
@@ -148,15 +193,20 @@ end
 
 -- Function to get the appropriate color for a column type and value state
 local function get_column_color(column_type, has_value)
-    if not has_value and column_type ~= "note" then
+    if not has_value and column_type ~= "note" and column_type ~= "effect_number" and column_type ~= "effect_amount" then
         return EMPTY_COLOR
     end
     if not has_value and column_type == "note" then
         return EMPTY_NOTE_COLOR
     end
+    if not has_value and (column_type == "effect_number" or column_type == "effect_amount") then
+        return EMPTY_EFFECT_COLOR
+    end
 
     if column_type == "note" then
         return NOTE_COLOR
+    elseif column_type == "effect_number" or column_type == "effect_amount" then
+        return EFFECT_COLOR
     else
         return OTHER_PARAM_COLOR
     end
@@ -179,6 +229,7 @@ local function rebuild_column_controls()
 
     local cc_index = 1
     local num_visible_note_columns = track.visible_note_columns
+    local num_visible_effect_columns = track.visible_effect_columns
 
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
@@ -233,13 +284,54 @@ local function rebuild_column_controls()
         end
     end
 
+    -- Assign CCs for all visible effect columns
+    for effect_col_idx = 1, num_visible_effect_columns do
+        local effect_params = {"effect_amount"}
+
+        -- Assign CCs for this effect column's parameters
+        for _, param_type in ipairs(effect_params) do
+            if cc_index <= table.getn(AVAILABLE_CCS) then
+                local cc = AVAILABLE_CCS[cc_index]
+                new_column_controls[cc] = {
+                    type = param_type,
+                    effect_column_index = effect_col_idx
+                }
+
+                -- Initialize last control state for this CC
+                new_last_controls[cc] = {
+                    command = 0,
+                    channel = 0,
+                    control_cc = 0,
+                    value = 0,
+                    count = 0,
+                    number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+                }
+
+                cc_index = cc_index + 1
+            else
+                -- Run out of available CCs
+                break
+            end
+        end
+
+        if cc_index > table.getn(AVAILABLE_CCS) then
+            break
+        end
+    end
+
     -- Find CCs that are being disabled and reset them
     for old_cc, old_control_info in pairs(old_column_controls) do
         if new_column_controls[old_cc] == nil then
             -- This CC is being disabled, reset it
             send_midi_feedback(old_cc, 0)        -- Reset value to 0
             send_color_feedback(old_cc, EMPTY_COLOR)  -- Reset color to blue (inactive)
-            print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. " col" .. old_control_info.note_column_index .. ")")
+            local col_info = ""
+            if old_control_info.note_column_index then
+                col_info = " note col" .. old_control_info.note_column_index
+            elseif old_control_info.effect_column_index then
+                col_info = " effect col" .. old_control_info.effect_column_index
+            end
+            print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. col_info .. ")")
         end
     end
 
@@ -249,12 +341,18 @@ local function rebuild_column_controls()
 
     print("MIDI Fighter Twister: Column controls rebuilt")
     for cc, control_info in pairs(COLUMN_CONTROLS) do
-        print("  CC" .. cc .. " -> " .. control_info.type .. " (note column " .. control_info.note_column_index .. ")")
+        local col_info = ""
+        if control_info.note_column_index then
+            col_info = " (note column " .. control_info.note_column_index .. ")"
+        elseif control_info.effect_column_index then
+            col_info = " (effect column " .. control_info.effect_column_index .. ")"
+        end
+        print("  CC" .. cc .. " -> " .. control_info.type .. col_info)
     end
 end
 
 -- Function to search backwards for a column value in previous lines
-local function search_backwards_for_value(column_type, note_column_index, current_line_index, song)
+local function search_backwards_for_value(column_type, column_index, current_line_index, song, is_effect_column)
     local params = COLUMN_PARAMS[column_type]
     if not params then
         return params.default_value
@@ -266,10 +364,21 @@ local function search_backwards_for_value(column_type, note_column_index, curren
     -- Search backwards from the previous line
     for line_index = current_line_index - 1, 1, -1 do
         local line = current_track:line(line_index)
-        if line and line.note_columns and note_column_index <= table.getn(line.note_columns) then
-            local prev_note_column = line.note_columns[note_column_index]
-            if prev_note_column then
-                local prev_value = params.getter(prev_note_column)
+        if line then
+            local prev_column = nil
+
+            if is_effect_column then
+                if line.effect_columns and column_index <= table.getn(line.effect_columns) then
+                    prev_column = line.effect_columns[column_index]
+                end
+            else
+                if line.note_columns and column_index <= table.getn(line.note_columns) then
+                    prev_column = line.note_columns[column_index]
+                end
+            end
+
+            if prev_column then
+                local prev_value = params.getter(prev_column)
 
                 if prev_value ~= params.absent_value then
                     return prev_value
@@ -282,8 +391,8 @@ local function search_backwards_for_value(column_type, note_column_index, curren
     return params.default_value
 end
 
--- Function to check if a value exists at the current position for a given column type and note column
-local function has_value_at_current_position(column_type, note_column_index)
+-- Function to check if a value exists at the current position for a given column type and column index
+local function has_value_at_current_position(column_type, column_index, is_effect_column)
     local song = renoise.song()
     local current_line = song.selected_line
 
@@ -291,14 +400,19 @@ local function has_value_at_current_position(column_type, note_column_index)
         return false
     end
 
-    local note_columns = current_line.note_columns
+    local columns = nil
+    if is_effect_column then
+        columns = current_line.effect_columns
+    else
+        columns = current_line.note_columns
+    end
 
-    if note_column_index > 0 and note_column_index <= table.getn(note_columns) then
-        local note_column = note_columns[note_column_index]
+    if column_index > 0 and column_index <= table.getn(columns) then
+        local column = columns[column_index]
         local params = COLUMN_PARAMS[column_type]
 
         if params then
-            local value = params.getter(note_column)
+            local value = params.getter(column)
             return value ~= params.absent_value
         end
     end
@@ -306,8 +420,8 @@ local function has_value_at_current_position(column_type, note_column_index)
     return false
 end
 
--- Function to get current column value for a specific note column
-local function get_current_column_value(column_type, note_column_index)
+-- Function to get current column value for a specific column
+local function get_current_column_value(column_type, column_index, is_effect_column)
     local song = renoise.song()
     local current_line = song.selected_line
 
@@ -315,33 +429,38 @@ local function get_current_column_value(column_type, note_column_index)
         return 0, nil
     end
 
-    local note_columns = current_line.note_columns
+    local columns = nil
+    if is_effect_column then
+        columns = current_line.effect_columns
+    else
+        columns = current_line.note_columns
+    end
 
-    if note_column_index > 0 and note_column_index <= table.getn(note_columns) then
-        local note_column = note_columns[note_column_index]
+    if column_index > 0 and column_index <= table.getn(columns) then
+        local column = columns[column_index]
         local params = COLUMN_PARAMS[column_type]
 
         if not params then
             return 0, nil
         end
 
-        local column_value = params.getter(note_column)
+        local column_value = params.getter(column)
 
         -- Handle empty values by looking back through previous lines
         if column_value == params.absent_value then
-            column_value = search_backwards_for_value(column_type, note_column_index, song.selected_line_index, song)
+            column_value = search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
         end
 
-        return column_value, note_column
+        return column_value, column
     end
 
     return 0, nil
 end
 
--- Function to update MIDI controller for a specific column type and note column
-local function update_controller_for_column(column_type, note_column_index, cc)
-    local current_value, _ = get_current_column_value(column_type, note_column_index)
-    local has_value = has_value_at_current_position(column_type, note_column_index)
+-- Function to update MIDI controller for a specific column type and column index
+local function update_controller_for_column(column_type, column_index, cc, is_effect_column)
+    local current_value, _ = get_current_column_value(column_type, column_index, is_effect_column)
+    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
     local color_value = get_column_color(column_type, has_value)
 
     -- Send both column value and color
@@ -352,15 +471,17 @@ end
 -- Function to update all controllers
 local function update_all_controllers()
     for cc, control_info in pairs(COLUMN_CONTROLS) do
-        update_controller_for_column(control_info.type, control_info.note_column_index, cc)
+        local is_effect_column = (control_info.effect_column_index ~= nil)
+        local column_index = control_info.note_column_index or control_info.effect_column_index
+        update_controller_for_column(control_info.type, column_index, cc, is_effect_column)
     end
 end
 
--- Function to modify column value for a specific note column
-local function modify_column_value(column_type, note_column_index, cc, direction)
-    local current_value, note_column = get_current_column_value(column_type, note_column_index)
+-- Function to modify column value for a specific column
+local function modify_column_value(column_type, column_index, cc, direction, is_effect_column)
+    local current_value, column = get_current_column_value(column_type, column_index, is_effect_column)
 
-    if not note_column then
+    if not column then
         return
     end
 
@@ -383,11 +504,11 @@ local function modify_column_value(column_type, note_column_index, cc, direction
         end
     end
 
-    params.setter(note_column, new_value, note_column_index)
+    params.setter(column, new_value, column_index)
 
     -- Send feedback
     send_midi_feedback(cc, new_value)
-    local has_value = has_value_at_current_position(column_type, note_column_index)
+    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
     local color_value = get_column_color(column_type, has_value)
     send_color_feedback(cc, color_value)
 end
@@ -447,10 +568,13 @@ local function midi_callback(message)
     elseif command == 176 and is_ready_to_modify(command, channel, data1) then
         local control_info = COLUMN_CONTROLS[data1]
         if control_info then
+            local is_effect_column = (control_info.effect_column_index ~= nil)
+            local column_index = control_info.note_column_index or control_info.effect_column_index
+
             if data2 == INCREASE_VALUE then
-                modify_column_value(control_info.type, control_info.note_column_index, data1, 1)
+                modify_column_value(control_info.type, column_index, data1, 1, is_effect_column)
             elseif data2 == DECREASE_VALUE then
-                modify_column_value(control_info.type, control_info.note_column_index, data1, -1)
+                modify_column_value(control_info.type, column_index, data1, -1, is_effect_column)
             end
         end
     end
@@ -504,6 +628,11 @@ local function attach_column_observers()
         track.visible_note_columns_observable:add_notifier(rebuild_column_controls)
     end
 
+    -- Add observer for effect columns visibility
+    if track.visible_effect_columns_observable:has_notifier(rebuild_column_controls) == false then
+        track.visible_effect_columns_observable:add_notifier(rebuild_column_controls)
+    end
+
     column_observers_attached = true
 end
 
@@ -535,6 +664,11 @@ local function detach_column_observers()
 
     if track.visible_note_columns_observable:has_notifier(rebuild_column_controls) then
         track.visible_note_columns_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    -- Remove effect columns observer
+    if track.visible_effect_columns_observable:has_notifier(rebuild_column_controls) then
+        track.visible_effect_columns_observable:remove_notifier(rebuild_column_controls)
     end
 
     column_observers_attached = false
