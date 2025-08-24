@@ -37,7 +37,7 @@ local COLUMN_PARAMS = {
         getter = function(note_column)
             return note_column.note_value
         end,
-        setter = function(note_column, value)
+        setter = function(note_column, value, note_column_index)
             note_column.note_value = value
         end,
         min_value = 0,
@@ -49,7 +49,7 @@ local COLUMN_PARAMS = {
         getter = function(note_column)
             return note_column.instrument_value
         end,
-        setter = function(note_column, value)
+        setter = function(note_column, value, note_column_index)
             note_column.instrument_value = value
         end,
         min_value = 0,
@@ -61,7 +61,7 @@ local COLUMN_PARAMS = {
         getter = function(note_column)
             return note_column.volume_value
         end,
-        setter = function(note_column, value)
+        setter = function(note_column, value, note_column_index)
             note_column.volume_value = value
         end,
         min_value = 0,
@@ -73,7 +73,7 @@ local COLUMN_PARAMS = {
         getter = function(note_column)
             return note_column.panning_value
         end,
-        setter = function(note_column, value)
+        setter = function(note_column, value, note_column_index)
             note_column.panning_value = value
         end,
         min_value = 0,
@@ -85,7 +85,7 @@ local COLUMN_PARAMS = {
         getter = function(note_column)
             return note_column.delay_value
         end,
-        setter = function(note_column, value)
+        setter = function(note_column, value, note_column_index)
             note_column.delay_value = value
         end,
         min_value = 0,
@@ -97,7 +97,7 @@ local COLUMN_PARAMS = {
         getter = function(note_column)
             return note_column.effect_amount_value
         end,
-        setter = function(note_column, value)
+        setter = function(note_column, value, note_column_index)
             note_column.effect_amount_value = value
             -- Also set effect_number_value from previous effects if current is empty
             if note_column.effect_number_value == 0 then
@@ -109,7 +109,7 @@ local COLUMN_PARAMS = {
                 -- Search backwards for effect_number_value in this same column
                 for line_index = current_line_index - 1, 1, -1 do
                     local line = current_track:line(line_index)
-                    if line and line.note_columns then
+                    if line and line.note_columns and note_column_index <= table.getn(line.note_columns) then
                         local prev_note_column = line.note_columns[note_column_index]
                         if prev_note_column and prev_note_column.effect_number_value ~= 0 then
                             note_column.effect_number_value = prev_note_column.effect_number_value
@@ -383,7 +383,7 @@ local function modify_column_value(column_type, note_column_index, cc, direction
         end
     end
 
-    params.setter(note_column, new_value)
+    params.setter(note_column, new_value, note_column_index)
 
     -- Send feedback
     send_midi_feedback(cc, new_value)
