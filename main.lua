@@ -65,7 +65,29 @@ local COLUMN_PARAMS = {
     },
     fx = {
         getter = function(note_column) return note_column.effect_amount_value end,
-        setter = function(note_column, value) note_column.effect_amount_value = value end,
+        setter = function(note_column, value)
+            note_column.effect_amount_value = value
+            -- Also set effect_number_value from previous effects if current is empty
+            if note_column.effect_number_value == 0 then
+                local song = renoise.song()
+                local selected_column = song.selected_note_column_index
+                local current_line_index = song.selected_line_index
+                local current_pattern = song.selected_pattern
+                local current_track = current_pattern.tracks[song.selected_track_index]
+
+                -- Search backwards for effect_number_value
+                for line_index = current_line_index - 1, 1, -1 do
+                    local line = current_track:line(line_index)
+                    if line and line.note_columns and selected_column <= table.getn(line.note_columns) then
+                        local prev_note_column = line.note_columns[selected_column]
+                        if prev_note_column and prev_note_column.effect_number_value ~= 0 then
+                            note_column.effect_number_value = prev_note_column.effect_number_value
+                            break
+                        end
+                    end
+                end
+            end
+        end,
         min_value = 0,
         max_value = 255,
         absent_value = 0,
