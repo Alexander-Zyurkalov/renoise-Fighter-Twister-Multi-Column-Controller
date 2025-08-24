@@ -97,41 +97,21 @@ local function midi_callback(message)
     end
 end
 
--- Timer function to check for edit position changes
-local function check_position_changes()
-    local song = renoise.song()
-    local current_pos = song.transport.edit_pos
-    local current_note_column = song.selected_note_column_index
-
-    -- Check if position or note column changed
-    if not last_edit_pos or
-            last_edit_pos.line ~= current_pos.line or
-            last_edit_pos.sequence ~= current_pos.sequence or
-            last_note_column ~= current_note_column then
-
-        last_edit_pos = {
-            line = current_pos.line,
-            sequence = current_pos.sequence
-        }
-        last_note_column = current_note_column
-        update_controller()
-    end
-end
 
 -- Function to start position monitoring
 local function start_position_timer()
-    if  renoise.tool():has_timer(check_position_changes) then
+    if  renoise.tool():has_timer(update_controller) then
         return
     end
 
     -- Check position every 500ms
-    position_timer = renoise.tool():add_timer(check_position_changes, 500)
+    position_timer = renoise.tool():add_timer(update_controller, 1000)
 end
 
 -- Function to stop position monitoring
 local function stop_position_timer()
-    if  renoise.tool():has_timer(check_position_changes) then
-        renoise.tool():remove_timer(check_position_changes)
+    if  renoise.tool():has_timer(update_controller) then
+        renoise.tool():remove_timer(update_controller)
         position_timer = nil
     end
 end
