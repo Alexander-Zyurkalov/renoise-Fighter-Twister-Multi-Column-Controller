@@ -75,12 +75,12 @@ local COLUMN_PARAMS = {
 
 -- Column control mapping
 local COLUMN_CONTROLS = {
-    [12] = { type = "note", cc = 12 },
-    [13] = { type = "instrument", cc = 13 },
-    [14] = { type = "volume", cc = 14 },
-    [15] = { type = "pan", cc = 15 },
-    [8] = { type = "delay", cc = 8 },
-    [9] = { type = "fx", cc = 9 }
+    [12] = { type = "note",  },
+    [13] = { type = "instrument",  },
+    [14] = { type = "volume",  },
+    [15] = { type = "pan",  },
+    [8] = { type = "delay",  },
+    [9] = { type = "fx",  }
 }
 
 -- Improved last control state tracking for each CC
@@ -230,14 +230,12 @@ local function modify_column_value(column_type, cc, direction)
 
     local new_value = current_value
 
-    -- Calculate new value
     if direction > 0 then
         new_value = math.min(params.max_value, current_value + 1)
     else
         new_value = math.max(params.min_value, current_value - 1)
     end
 
-    -- Set the column value using the setter function
     params.setter(note_column, new_value)
 
     -- Send feedback
