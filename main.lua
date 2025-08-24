@@ -1,6 +1,6 @@
 -- MIDI Fighter Twister Multi-Column Controller for Renoise
--- Controls instrument, pan, delay, and FX columns with feedback
--- CC12: Instrument, CC13: Pan, CC14: Delay, CC15: FX
+-- Controls instrument, volume, pan, delay, and FX columns with feedback
+-- CC12: Instrument, CC13: Volume, CC14: Pan, CC15: Delay, CC16: FX
 -- Sends color feedback on corresponding CCs: Green if value exists, Blue if empty
 
 -- Global variables
@@ -20,9 +20,10 @@ local DEVICE_NAME = "Midi Fighter Twister"
 -- Column control mapping
 local COLUMN_CONTROLS = {
     [12] = { type = "instrument", cc = 12 },
-    [13] = { type = "pan", cc = 13 },
-    [14] = { type = "delay", cc = 14 },
-    [15] = { type = "fx", cc = 15 }
+    [13] = { type = "volume", cc = 13 },
+    [14] = { type = "pan", cc = 14 },
+    [15] = { type = "delay", cc = 15 },
+    [8] = { type = "fx", cc = 16 }
 }
 
 -- Color values for MIDI Fighter Twister
@@ -58,10 +59,12 @@ local function has_value_at_current_position(column_type)
 
         if column_type == "instrument" then
             return note_column.instrument_value ~= 255
+        elseif column_type == "volume" then
+            return note_column.volume_value ~= 255
         elseif column_type == "pan" then
             return note_column.panning_value ~= 255
         elseif column_type == "delay" then
-            return note_column.delay_value ~= 255
+            return note_column.delay_value ~= 0
         elseif column_type == "fx" then
             return note_column.effect_number_value ~= 0 or note_column.effect_amount_value ~= 0
         end
@@ -89,6 +92,8 @@ local function get_current_column_value(column_type)
         -- Get the appropriate value based on column type
         if column_type == "instrument" then
             column_value = note_column.instrument_value
+        elseif column_type == "volume" then
+            column_value = note_column.volume_value
         elseif column_type == "pan" then
             column_value = note_column.panning_value
         elseif column_type == "delay" then
@@ -114,6 +119,8 @@ local function get_current_column_value(column_type)
 
                         if column_type == "instrument" then
                             prev_value = prev_note_column.instrument_value
+                        elseif column_type == "volume" then
+                            prev_value = prev_note_column.volume_value
                         elseif column_type == "pan" then
                             prev_value = prev_note_column.panning_value
                         elseif column_type == "delay" then
@@ -198,6 +205,8 @@ local function modify_column_value(column_type, cc, direction)
     -- Set appropriate ranges for different column types
     if column_type == "instrument" then
         min_val, max_val = 0, 254
+    elseif column_type == "volume" then
+        min_val, max_val = 0, 127
     elseif column_type == "pan" then
         min_val, max_val = 0, 127
     elseif column_type == "delay" then
@@ -216,6 +225,8 @@ local function modify_column_value(column_type, cc, direction)
     -- Set the appropriate column value
     if column_type == "instrument" then
         note_column.instrument_value = new_value
+    elseif column_type == "volume" then
+        note_column.volume_value = new_value
     elseif column_type == "pan" then
         note_column.panning_value = new_value
     elseif column_type == "delay" then
