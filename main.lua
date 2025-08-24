@@ -95,6 +95,35 @@ for cc, _ in pairs(COLUMN_CONTROLS) do
     }
 end
 
+-- Function to search backwards for a column value in previous lines
+local function search_backwards_for_value(column_type, selected_column, current_line_index, song)
+    local params = COLUMN_PARAMS[column_type]
+    if not params then
+        return params.default_value
+    end
+
+    local current_pattern = song.selected_pattern
+    local current_track = current_pattern.tracks[song.selected_track_index]
+
+    -- Search backwards from the previous line
+    for line_index = current_line_index - 1, 1, -1 do
+        local line = current_track:line(line_index)
+        if line and line.note_columns and selected_column <= table.getn(line.note_columns) then
+            local prev_note_column = line.note_columns[selected_column]
+            if prev_note_column then
+                local prev_value = params.getter(prev_note_column)
+
+                if prev_value ~= params.absent_value then
+                    return prev_value
+                end
+            end
+        end
+    end
+
+    -- If we still have absent value after looking back, return default
+    return params.default_value
+end
+
 -- Function to check if a value exists at the current position for a given column type
 local function has_value_at_current_position(column_type)
     local song = renoise.song()
@@ -113,7 +142,6 @@ local function has_value_at_current_position(column_type)
 
         if params then
             local value = params.getter(note_column)
-            print("type = " , column_type , ", value = " , value)
             return value ~= params.absent_value
         end
     end
@@ -145,30 +173,7 @@ local function get_current_column_value(column_type)
 
         -- Handle empty values by looking back through previous lines
         if column_value == params.absent_value then
-            local current_pattern = song.selected_pattern
-            local current_track = current_pattern.tracks[song.selected_track_index]
-            local current_line_index = song.selected_line_index
-
-            -- Search backwards from the previous line
-            for line_index = current_line_index - 1, 1, -1 do
-                local line = current_track:line(line_index)
-                if line and line.note_columns and selected_column <= table.getn(line.note_columns) then
-                    local prev_note_column = line.note_columns[selected_column]
-                    if prev_note_column then
-                        local prev_value = params.getter(prev_note_column)
-
-                        if prev_value ~= params.absent_value then
-                            column_value = prev_value
-                            break
-                        end
-                    end
-                end
-            end
-
-            -- If we still have absent value after looking back, set default
-            if column_value == params.absent_value then
-                column_value = params.default_value
-            end
+            column_value = search_backwards_for_value(column_type, selected_column, song.selected_line_index, song)
         end
 
         return column_value, note_column
