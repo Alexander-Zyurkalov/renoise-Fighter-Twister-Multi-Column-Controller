@@ -23,6 +23,14 @@ local BLUE_COLOR = 0     -- No value/empty
 
 -- Column parameter configuration hash-map
 local COLUMN_PARAMS = {
+    note = {
+        getter = function(note_column) return note_column.note_value end,
+        setter = function(note_column, value) note_column.note_value = value end,
+        min_value = 0,
+        max_value = 120,
+        absent_value = 121,
+        default_value = 0,
+    },
     instrument = {
         getter = function(note_column) return note_column.instrument_value end,
         setter = function(note_column, value) note_column.instrument_value = value end,
@@ -43,8 +51,8 @@ local COLUMN_PARAMS = {
         getter = function(note_column) return note_column.panning_value end,
         setter = function(note_column, value) note_column.panning_value = value end,
         min_value = 0,
-        max_value = 0x79,
-        absent_value = 0,
+        max_value = 0x80,
+        absent_value = 0xFF,
         default_value = 0x40,  -- Center pan
     },
     delay = {
@@ -67,11 +75,12 @@ local COLUMN_PARAMS = {
 
 -- Column control mapping
 local COLUMN_CONTROLS = {
-    [12] = { type = "instrument", cc = 12 },
-    [13] = { type = "volume", cc = 13 },
-    [14] = { type = "pan", cc = 14 },
-    [15] = { type = "delay", cc = 15 },
-    [8] = { type = "fx", cc = 8 }
+    [12] = { type = "note", cc = 12 },
+    [13] = { type = "instrument", cc = 13 },
+    [14] = { type = "volume", cc = 14 },
+    [15] = { type = "pan", cc = 15 },
+    [8] = { type = "delay", cc = 8 },
+    [9] = { type = "fx", cc = 9 }
 }
 
 -- Improved last control state tracking for each CC
@@ -103,7 +112,9 @@ local function has_value_at_current_position(column_type)
         local params = COLUMN_PARAMS[column_type]
 
         if params then
-            return params.getter(note_column) ~= params.absent_value
+            local value = params.getter(note_column)
+            print("type = " , column_type , ", value = " , value)
+            return value ~= params.absent_value
         end
     end
 
