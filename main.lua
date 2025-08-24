@@ -23,7 +23,7 @@ local GREEN_COLOR = 40    -- Value exists
 local BLUE_COLOR = 0     -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
-local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11,}
+local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3}
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
 local COLUMN_CONTROLS = {}
