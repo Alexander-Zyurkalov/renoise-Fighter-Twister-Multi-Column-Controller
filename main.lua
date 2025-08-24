@@ -1,5 +1,6 @@
 -- MIDI Fighter Twister Instrument Controller for Renoise
 -- Controls instrument number with CC12 Channel 1 and sends feedback
+-- Also sends color feedback on CC13: Green if note exists, Blue if empty
 
 -- Global variables
 local midi_device = nil
@@ -10,12 +11,17 @@ local last_edit_pos = nil
 local last_note_column = nil
 
 -- MIDI control settings
-local CONTROL_CC = 12
+local CC_FOR_VOLUME_CONTROL = 12
 local CONTROL_CHANNEL = 1
+local COLOUR_CHANNEL = 2
 local INCREASE_VALUE = 65
 local DECREASE_VALUE = 63
 local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
 local DEVICE_NAME = "Midi Fighter Twister"
+
+-- Color values for MIDI Fighter Twister (adjust these based on your device's color mapping)
+local GREEN_COLOR = 40    -- Greenish color value
+local BLUE_COLOR = 1    -- Blue color value
 
 -- Improved last control state tracking (following Lua conventions)
 local last_control = {
@@ -26,7 +32,31 @@ local last_control = {
     count = 0
 }
 
--- Function to get current instrument value and note column
+-- Function to check if a note exists at the current position
+local function has_note_at_current_position()
+    local song = renoise.song()
+    local current_line = song.selected_line
+
+    if not current_line then
+        return false
+    end
+
+    local note_columns = current_line.note_columns
+    local selected_column = song.selected_note_column_index
+
+    if selected_column > 0 and selected_column <= table.getn(note_columns) then
+        local note_column = note_columns[selected_column]
+
+        -- Check if there's a note (not empty and not OFF)
+        if note_column.note_value < 120 then -- 120+ are special values (OFF, etc.)
+            return true
+        end
+    end
+
+    return false
+end
+
+-- Function to get current instrument value and note column (kept for potential future use)
 local function get_current_instrument()
     local song = renoise.song()
     local current_line = song.selected_line
@@ -79,18 +109,32 @@ local function send_midi_feedback(value)
     if midi_output_device then
         local status_byte = 176 + (CONTROL_CHANNEL - 1)
         local clamped_value = math.min(127, value)
-        local message = { status_byte, CONTROL_CC, clamped_value }
+        local message = { status_byte, CC_FOR_VOLUME_CONTROL, clamped_value }
         midi_output_device:send(message)
     end
 end
 
--- Function to update MIDI controller with current instrument
-local function update_controller()
-    local current_instrument, _ = get_current_instrument()
-    send_midi_feedback(current_instrument)
+local function send_color_feedback(color_value)
+    if midi_output_device then
+        local status_byte = 176 + (COLOUR_CHANNEL - 1)
+        local clamped_value = math.min(127, color_value)
+        local message = { status_byte, CC_FOR_VOLUME_CONTROL, clamped_value }
+        midi_output_device:send(message)
+    end
 end
 
--- Function to modify instrument number
+-- Function to update MIDI controller with current instrument and color based on note presence
+local function update_controller()
+    local current_instrument, _ = get_current_instrument()
+    local has_note = has_note_at_current_position()
+    local color_value = has_note and GREEN_COLOR or BLUE_COLOR
+
+    -- Send both instrument value and color
+    send_midi_feedback(current_instrument)
+    send_color_feedback(color_value)
+end
+
+-- Function to modify instrument number (kept for encoder functionality)
 local function modify_instrument(direction)
     local current_instrument, note_column = get_current_instrument()
 
@@ -106,7 +150,12 @@ local function modify_instrument(direction)
     end
 
     note_column.instrument_value = new_instrument
+
+    -- Send both updated instrument value and current color
     send_midi_feedback(new_instrument)
+    local has_note = has_note_at_current_position()
+    local color_value = has_note and GREEN_COLOR or BLUE_COLOR
+    send_color_feedback(color_value)
 end
 
 local function is_ready_to_modify(command, channel, control_cc)
@@ -133,7 +182,7 @@ local function is_ready_to_modify(command, channel, control_cc)
     -- Check if we should modify: correct CC message on correct channel with enough repetitions
     return (command == 176 and
             channel == CONTROL_CHANNEL and
-            control_cc == CONTROL_CC and
+            control_cc == CC_FOR_VOLUME_CONTROL and
             last_control.count == NUMBER_OF_STEPS_TO_CHANGE_VALUE)
 end
 
@@ -258,7 +307,7 @@ local function initialize_midi_devices()
     -- Attach observers and update controller
     if midi_output_device then
         attach_observers()
-        update_controller() -- Send current instrument value immediately
+        update_controller() -- Send current instrument and color values immediately
     end
 end
 
