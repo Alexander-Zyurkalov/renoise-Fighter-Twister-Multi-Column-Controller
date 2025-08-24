@@ -24,47 +24,69 @@ local BLUE_COLOR = 0     -- No value/empty
 -- Column parameter configuration hash-map
 local COLUMN_PARAMS = {
     note = {
-        getter = function(note_column) return note_column.note_value end,
-        setter = function(note_column, value) note_column.note_value = value end,
+        getter = function(note_column)
+            return note_column.note_value
+        end,
+        setter = function(note_column, value)
+            note_column.note_value = value
+        end,
         min_value = 0,
         max_value = 120,
         absent_value = 121,
         default_value = 0,
     },
     instrument = {
-        getter = function(note_column) return note_column.instrument_value end,
-        setter = function(note_column, value) note_column.instrument_value = value end,
+        getter = function(note_column)
+            return note_column.instrument_value
+        end,
+        setter = function(note_column, value)
+            note_column.instrument_value = value
+        end,
         min_value = 0,
         max_value = 254,
         absent_value = 255,
         default_value = 0,
     },
     volume = {
-        getter = function(note_column) return note_column.volume_value end,
-        setter = function(note_column, value) note_column.volume_value = value end,
+        getter = function(note_column)
+            return note_column.volume_value
+        end,
+        setter = function(note_column, value)
+            note_column.volume_value = value
+        end,
         min_value = 0,
         max_value = 0x80,
         absent_value = 0xFF,
         default_value = 0,
     },
     pan = {
-        getter = function(note_column) return note_column.panning_value end,
-        setter = function(note_column, value) note_column.panning_value = value end,
+        getter = function(note_column)
+            return note_column.panning_value
+        end,
+        setter = function(note_column, value)
+            note_column.panning_value = value
+        end,
         min_value = 0,
         max_value = 0x80,
         absent_value = 0xFF,
-        default_value = 0x40,  -- Center pan
+        default_value = 0x40, -- Center pan
     },
     delay = {
-        getter = function(note_column) return note_column.delay_value end,
-        setter = function(note_column, value) note_column.delay_value = value end,
+        getter = function(note_column)
+            return note_column.delay_value
+        end,
+        setter = function(note_column, value)
+            note_column.delay_value = value
+        end,
         min_value = 0,
         max_value = 0xFF,
         absent_value = 0,
         default_value = 0,
     },
     fx = {
-        getter = function(note_column) return note_column.effect_amount_value end,
+        getter = function(note_column)
+            return note_column.effect_amount_value
+        end,
         setter = function(note_column, value)
             note_column.effect_amount_value = value
             -- Also set effect_number_value from previous effects if current is empty
@@ -97,12 +119,12 @@ local COLUMN_PARAMS = {
 
 -- Column control mapping
 local COLUMN_CONTROLS = {
-    [12] = { type = "note",  },
-    [13] = { type = "instrument",  },
-    [14] = { type = "volume",  },
-    [15] = { type = "pan",  },
-    [8] = { type = "delay",  },
-    [9] = { type = "fx",  }
+    [12] = { type = "note", },
+    [13] = { type = "instrument", },
+    [14] = { type = "volume", },
+    [15] = { type = "pan", },
+    [8] = { type = "delay", },
+    [9] = { type = "fx", }
 }
 
 -- Improved last control state tracking for each CC
@@ -113,7 +135,8 @@ for cc, _ in pairs(COLUMN_CONTROLS) do
         channel = 0,
         control_cc = 0,
         value = 0,
-        count = 0
+        count = 0,
+        number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
     }
 end
 
@@ -288,7 +311,7 @@ local function is_ready_to_modify(command, channel, control_cc)
         -- Increment counter for consecutive identical messages
         last_control.count = last_control.count + 1
         -- Reset counter if it exceeds the threshold
-        if last_control.count > NUMBER_OF_STEPS_TO_CHANGE_VALUE then
+        if last_control.count > last_control.number_of_steps_to_change_value then
             last_control.count = 1
         end
     else
@@ -300,10 +323,9 @@ local function is_ready_to_modify(command, channel, control_cc)
     end
 
     -- Check if we should modify: correct CC message on correct channel with enough repetitions
-    return (command == 176 and
-            channel == CONTROL_CHANNEL and
+    return (channel == CONTROL_CHANNEL and
             COLUMN_CONTROLS[control_cc] ~= nil and
-            last_control.count == NUMBER_OF_STEPS_TO_CHANGE_VALUE)
+            last_control.count >= last_control.number_of_steps_to_change_value)
 end
 
 -- MIDI event handler
@@ -315,7 +337,13 @@ local function midi_callback(message)
     local channel = (status % 16) + 1
     local command = status - (status % 16)
 
-    if is_ready_to_modify(command, channel, data1) then
+    if  command == 176 and data2 == 127 or data2 == 0 then
+        if data2 == 127 then
+            last_controls[data1].number_of_steps_to_change_value = 1
+        elseif data2 == 0 then
+            last_controls[data1].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
+        end
+    elseif command == 176  and is_ready_to_modify(command, channel, data1) then
         local control_info = COLUMN_CONTROLS[data1]
         if control_info then
             if data2 == INCREASE_VALUE then
