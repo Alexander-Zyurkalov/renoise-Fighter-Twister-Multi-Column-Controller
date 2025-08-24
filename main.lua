@@ -19,8 +19,10 @@ local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
 local DEVICE_NAME = "Midi Fighter Twister"
 
 -- Color values for MIDI Fighter Twister
-local GREEN_COLOR = 40    -- Value exists
-local BLUE_COLOR = 0     -- No value/empty
+local NOTE_COLOR = 50        -- Note values (to differentiate note column boundaries)
+local EMPTY_NOTE_COLOR = 30        -- Note values (to differentiate note column boundaries)
+local OTHER_PARAM_COLOR = 70 -- Other parameters (instrument, volume, pan, delay, fx)
+local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3}
@@ -144,8 +146,21 @@ local function send_color_feedback(cc, color_value)
     end
 end
 
--- Dynamic last control state tracking (rebuilt when COLUMN_CONTROLS changes)
-local last_controls = {}
+-- Function to get the appropriate color for a column type and value state
+local function get_column_color(column_type, has_value)
+    if not has_value and column_type ~= "note" then
+        return EMPTY_COLOR
+    end
+    if not has_value and column_type == "note" then
+        return EMPTY_NOTE_COLOR
+    end
+
+    if column_type == "note" then
+        return NOTE_COLOR
+    else
+        return OTHER_PARAM_COLOR
+    end
+end
 
 -- Function to rebuild COLUMN_CONTROLS based on current track's visible columns
 local function rebuild_column_controls()
@@ -223,7 +238,7 @@ local function rebuild_column_controls()
         if new_column_controls[old_cc] == nil then
             -- This CC is being disabled, reset it
             send_midi_feedback(old_cc, 0)        -- Reset value to 0
-            send_color_feedback(old_cc, BLUE_COLOR)  -- Reset color to blue (inactive)
+            send_color_feedback(old_cc, EMPTY_COLOR)  -- Reset color to blue (inactive)
             print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. " col" .. old_control_info.note_column_index .. ")")
         end
     end
@@ -327,7 +342,7 @@ end
 local function update_controller_for_column(column_type, note_column_index, cc)
     local current_value, _ = get_current_column_value(column_type, note_column_index)
     local has_value = has_value_at_current_position(column_type, note_column_index)
-    local color_value = has_value and GREEN_COLOR or BLUE_COLOR
+    local color_value = get_column_color(column_type, has_value)
 
     -- Send both column value and color
     send_midi_feedback(cc, current_value)
@@ -373,7 +388,7 @@ local function modify_column_value(column_type, note_column_index, cc, direction
     -- Send feedback
     send_midi_feedback(cc, new_value)
     local has_value = has_value_at_current_position(column_type, note_column_index)
-    local color_value = has_value and GREEN_COLOR or BLUE_COLOR
+    local color_value = get_column_color(column_type, has_value)
     send_color_feedback(cc, color_value)
 end
 
