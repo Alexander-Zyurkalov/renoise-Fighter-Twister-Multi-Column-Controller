@@ -281,9 +281,15 @@ local function modify_column_value(column_type, cc, direction)
     local new_value = current_value
 
     if direction > 0 then
-        new_value = math.min(params.max_value, current_value + 1)
+        new_value = current_value + 1
+        if new_value > params.max_value then
+            new_value = params.min_value
+        end
     else
-        new_value = math.max(params.min_value, current_value - 1)
+        new_value = current_value - 1
+        if new_value < params.min_value then
+            new_value = params.max_value
+        end
     end
 
     params.setter(note_column, new_value)
@@ -338,9 +344,9 @@ local function midi_callback(message)
     local command = status - (status % 16)
 
     if  command == 176 and data2 == 127 or data2 == 0 then
-        if data2 == 127 then
+        if data2 == 127 and  last_controls[data1] then
             last_controls[data1].number_of_steps_to_change_value = 1
-        elseif data2 == 0 then
+        elseif data2 == 0 and last_controls[data1] then
             last_controls[data1].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
         end
     elseif command == 176  and is_ready_to_modify(command, channel, data1) then
