@@ -17,18 +17,62 @@ local DECREASE_VALUE = 63
 local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
 local DEVICE_NAME = "Midi Fighter Twister"
 
+-- Color values for MIDI Fighter Twister
+local GREEN_COLOR = 40    -- Value exists
+local BLUE_COLOR = 0     -- No value/empty
+
+-- Column parameter configuration hash-map
+local COLUMN_PARAMS = {
+    instrument = {
+        getter = function(note_column) return note_column.instrument_value end,
+        setter = function(note_column, value) note_column.instrument_value = value end,
+        min_value = 0,
+        max_value = 254,
+        absent_value = 255,
+        default_value = 0,
+    },
+    volume = {
+        getter = function(note_column) return note_column.volume_value end,
+        setter = function(note_column, value) note_column.volume_value = value end,
+        min_value = 0,
+        max_value = 0x80,
+        absent_value = 0xFF,
+        default_value = 0,
+    },
+    pan = {
+        getter = function(note_column) return note_column.panning_value end,
+        setter = function(note_column, value) note_column.panning_value = value end,
+        min_value = 0,
+        max_value = 0x79,
+        absent_value = 0,
+        default_value = 0x40,  -- Center pan
+    },
+    delay = {
+        getter = function(note_column) return note_column.delay_value end,
+        setter = function(note_column, value) note_column.delay_value = value end,
+        min_value = 0,
+        max_value = 0xFF,
+        absent_value = 0,
+        default_value = 0,
+    },
+    fx = {
+        getter = function(note_column) return note_column.effect_amount_value end,
+        setter = function(note_column, value) note_column.effect_amount_value = value end,
+        min_value = 0,
+        max_value = 255,
+        absent_value = 0,
+        default_value = 0
+    }
+}
+
 -- Column control mapping
 local COLUMN_CONTROLS = {
     [12] = { type = "instrument", cc = 12 },
     [13] = { type = "volume", cc = 13 },
     [14] = { type = "pan", cc = 14 },
     [15] = { type = "delay", cc = 15 },
-    [8] = { type = "fx", cc = 16 }
+    [8] = { type = "fx", cc = 8 }
 }
-
--- Color values for MIDI Fighter Twister
-local GREEN_COLOR = 40    -- Value exists
-local BLUE_COLOR = 1     -- No value/empty
 
 -- Improved last control state tracking for each CC
 local last_controls = {}
@@ -56,17 +100,10 @@ local function has_value_at_current_position(column_type)
 
     if selected_column > 0 and selected_column <= table.getn(note_columns) then
         local note_column = note_columns[selected_column]
+        local params = COLUMN_PARAMS[column_type]
 
-        if column_type == "instrument" then
-            return note_column.instrument_value ~= 255
-        elseif column_type == "volume" then
-            return note_column.volume_value ~= 255
-        elseif column_type == "pan" then
-            return note_column.panning_value ~= 255
-        elseif column_type == "delay" then
-            return note_column.delay_value ~= 0
-        elseif column_type == "fx" then
-            return note_column.effect_number_value ~= 0 or note_column.effect_amount_value ~= 0
+        if params then
+            return params.getter(note_column) ~= params.absent_value
         end
     end
 
@@ -87,24 +124,16 @@ local function get_current_column_value(column_type)
 
     if selected_column > 0 and selected_column <= table.getn(note_columns) then
         local note_column = note_columns[selected_column]
-        local column_value = 0
+        local params = COLUMN_PARAMS[column_type]
 
-        -- Get the appropriate value based on column type
-        if column_type == "instrument" then
-            column_value = note_column.instrument_value
-        elseif column_type == "volume" then
-            column_value = note_column.volume_value
-        elseif column_type == "pan" then
-            column_value = note_column.panning_value
-        elseif column_type == "delay" then
-            column_value = note_column.delay_value
-        elseif column_type == "fx" then
-            -- For FX, we'll use effect_amount_value as the main controllable parameter
-            column_value = note_column.effect_amount_value
+        if not params then
+            return 0, nil
         end
 
-        -- Handle empty values (255) by looking back through previous lines
-        if column_value == 255 then
+        local column_value = params.getter(note_column)
+
+        -- Handle empty values by looking back through previous lines
+        if column_value == params.absent_value then
             local current_pattern = song.selected_pattern
             local current_track = current_pattern.tracks[song.selected_track_index]
             local current_line_index = song.selected_line_index
@@ -115,21 +144,9 @@ local function get_current_column_value(column_type)
                 if line and line.note_columns and selected_column <= table.getn(line.note_columns) then
                     local prev_note_column = line.note_columns[selected_column]
                     if prev_note_column then
-                        local prev_value = 0
+                        local prev_value = params.getter(prev_note_column)
 
-                        if column_type == "instrument" then
-                            prev_value = prev_note_column.instrument_value
-                        elseif column_type == "volume" then
-                            prev_value = prev_note_column.volume_value
-                        elseif column_type == "pan" then
-                            prev_value = prev_note_column.panning_value
-                        elseif column_type == "delay" then
-                            prev_value = prev_note_column.delay_value
-                        elseif column_type == "fx" then
-                            prev_value = prev_note_column.effect_amount_value
-                        end
-
-                        if prev_value ~= 255 then
+                        if prev_value ~= params.absent_value then
                             column_value = prev_value
                             break
                         end
@@ -137,13 +154,9 @@ local function get_current_column_value(column_type)
                 end
             end
 
-            -- If we still have 255 after looking back, set default
-            if column_value == 255 then
-                if column_type == "pan" then
-                    column_value = 64  -- Center pan
-                else
-                    column_value = 0
-                end
+            -- If we still have absent value after looking back, set default
+            if column_value == params.absent_value then
+                column_value = params.default_value
             end
         end
 
@@ -199,45 +212,22 @@ local function modify_column_value(column_type, cc, direction)
         return
     end
 
-    local new_value = current_value
-    local min_val, max_val = 0, 127
-
-    -- Set appropriate ranges for different column types
-    if column_type == "instrument" then
-        min_val, max_val = 0, 254
-    elseif column_type == "volume" then
-        min_val, max_val = 0, 127
-    elseif column_type == "pan" then
-        min_val, max_val = 0, 127
-    elseif column_type == "delay" then
-        min_val, max_val = 0, 255
-    elseif column_type == "fx" then
-        min_val, max_val = 0, 255
+    local params = COLUMN_PARAMS[column_type]
+    if not params then
+        return
     end
+
+    local new_value = current_value
 
     -- Calculate new value
     if direction > 0 then
-        new_value = math.min(max_val, current_value + 1)
+        new_value = math.min(params.max_value, current_value + 1)
     else
-        new_value = math.max(min_val, current_value - 1)
+        new_value = math.max(params.min_value, current_value - 1)
     end
 
-    -- Set the appropriate column value
-    if column_type == "instrument" then
-        note_column.instrument_value = new_value
-    elseif column_type == "volume" then
-        note_column.volume_value = new_value
-    elseif column_type == "pan" then
-        note_column.panning_value = new_value
-    elseif column_type == "delay" then
-        note_column.delay_value = new_value
-    elseif column_type == "fx" then
-        note_column.effect_amount_value = new_value
-        -- If effect amount is being set and there's no effect number, set a default
-        if new_value > 0 and note_column.effect_number_value == 0 then
-            note_column.effect_number_value = 1  -- Default to first effect
-        end
-    end
+    -- Set the column value using the setter function
+    params.setter(note_column, new_value)
 
     -- Send feedback
     send_midi_feedback(cc, new_value)
