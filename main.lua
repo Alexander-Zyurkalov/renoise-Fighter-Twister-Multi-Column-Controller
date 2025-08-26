@@ -26,7 +26,8 @@ local EFFECT_COLOR = 90      -- Effect columns (effect number/amount)
 local EMPTY_EFFECT_COLOR = 20 -- Empty effect columns
 local AUTOMATION_COLOR = 110  -- Automation control (purple/magenta)
 local AUTOMATION_SCALING_COLOR = 100  -- Automation scaling control (different purple)
-local EMPTY_AUTOMATION_COLOR = 45 -- Empty automation
+local AUTOMATION_PREV_SCALING_COLOR = 90  -- Previous point scaling control (darker purple)
+local EMPTY_AUTOMATION_COLOR = 110 -- Empty automation
 local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
@@ -68,6 +69,33 @@ local function get_automation_and_point()
     end
 
     return automation, nil
+end
+
+local function get_automation_and_prev_point()
+    local song = renoise.song()
+    if not song.selected_automation_parameter then
+        return nil, nil
+    end
+
+    local param = song.selected_automation_parameter
+    local automation = song.selected_pattern_track:find_automation(param)
+    if not automation then
+        return nil, nil
+    end
+
+    local current_line = song.selected_line_index
+    local prev_point = nil
+    local latest_time = 0
+
+    -- Find the most recent automation point before current line
+    for _, point in ipairs(automation.points) do
+        if point.time < current_line and point.time > latest_time then
+            prev_point = point
+            latest_time = point.time
+        end
+    end
+
+    return automation, prev_point
 end
 
 local function create_or_get_automation()
@@ -308,6 +336,44 @@ local COLUMN_PARAMS = {
         max_value = 127,
         absent_value = -1,
         default_value = 64, -- Middle value (0.0 scaling)
+    },
+    automation_prev_scaling = {
+        getter = function()
+            local automation, prev_point = get_automation_and_prev_point()
+            if not automation or not prev_point then
+                return 64  -- Default to linear scaling if no previous point
+            end
+
+            -- Scale the scaling value to 0-127 range
+            local scaling = prev_point.scaling
+            local normalized_scaling = (scaling + 2.0) / 4.0  -- Map -2.0 to 2.0 -> 0.0 to 1.0
+            return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
+        end,
+        setter = function(_, value, _)
+            local song = renoise.song()
+            if not song.selected_automation_parameter then
+                return
+            end
+
+            local automation, prev_point = get_automation_and_prev_point()
+            if not automation or not prev_point then
+                return  -- No previous point to modify
+            end
+
+            -- Convert 0-127 value back to scaling range (-2.0 to 2.0)
+            local normalized_value = value / 127
+            local scaling_value = (normalized_value * 4.0) - 2.0  -- Map 0.0-1.0 -> -2.0 to 2.0
+
+            -- Remove old point and add new one with updated scaling
+            local prev_time = prev_point.time
+            local prev_value = prev_point.value
+            automation:remove_point_at(prev_time)
+            automation:add_point_at(prev_time, prev_value, scaling_value)
+        end,
+        min_value = 0,
+        max_value = 127,
+        absent_value = -1,
+        default_value = 64, -- Middle value (0.0 scaling)
     }
 }
 
@@ -344,6 +410,18 @@ local function get_column_color(column_type, has_value)
         local song = renoise.song()
         if song.selected_automation_parameter and song.selected_automation_parameter.is_automated then
             return AUTOMATION_SCALING_COLOR
+        else
+            return EMPTY_AUTOMATION_COLOR
+        end
+    elseif column_type == "automation_prev_scaling" then
+        local song = renoise.song()
+        if song.selected_automation_parameter and song.selected_automation_parameter.is_automated then
+            local automation, prev_point = get_automation_and_prev_point()
+            if prev_point then
+                return AUTOMATION_PREV_SCALING_COLOR
+            else
+                return EMPTY_AUTOMATION_COLOR
+            end
         else
             return EMPTY_AUTOMATION_COLOR
         end
@@ -440,8 +518,8 @@ local function rebuild_column_controls()
         end
     end
 
-    -- Add automation controls (value and scaling)
-    local automation_params = { "automation", "automation_scaling" }
+    -- Add automation controls (prev scaling, value, and current scaling)
+    local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
     for _, param_type in ipairs(automation_params) do
         if cc_index <= table.getn(AVAILABLE_CCS) then
             local cc = AVAILABLE_CCS[cc_index]
@@ -514,6 +592,8 @@ local function rebuild_column_controls()
                 col_info = " automation"
             elseif old_control_info.type == "automation_scaling" then
                 col_info = " automation scaling"
+            elseif old_control_info.type == "automation_prev_scaling" then
+                col_info = " automation prev scaling"
             end
             print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. col_info .. ")")
         end
@@ -534,6 +614,8 @@ local function rebuild_column_controls()
             col_info = " (automation value)"
         elseif control_info.type == "automation_scaling" then
             col_info = " (automation scaling)"
+        elseif control_info.type == "automation_prev_scaling" then
+            col_info = " (automation prev scaling)"
         end
         print("  CC" .. cc .. " -> " .. control_info.type .. col_info)
     end
@@ -584,6 +666,13 @@ local function has_value_at_current_position(column_type, column_index, is_effec
     if column_type == "automation" or column_type == "automation_scaling" then
         local song = renoise.song()
         return song.selected_automation_parameter ~= nil
+    elseif column_type == "automation_prev_scaling" then
+        local song = renoise.song()
+        if not song.selected_automation_parameter then
+            return false
+        end
+        local automation, prev_point = get_automation_and_prev_point()
+        return prev_point ~= nil
     end
 
     local song = renoise.song()
@@ -615,7 +704,7 @@ end
 
 -- Function to get current column value for a specific column
 local function get_current_column_value(column_type, column_index, is_effect_column)
-    if column_type == "automation" or column_type == "automation_scaling" then
+    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
         return params.getter(), nil
     end
@@ -657,7 +746,7 @@ end
 
 -- Function to set selection for a specific column
 local function set_selection(column_type, column_index, is_effect_column)
-    if column_type == "automation" or column_type == "automation_scaling" then
+    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         -- Switch to automation view if not already there
         if renoise.app().window.active_lower_frame ~= renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION then
             renoise.app().window.active_lower_frame = renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION
@@ -740,7 +829,7 @@ end
 
 -- Function to modify column value for a specific column
 local function modify_column_value(column_type, column_index, cc, direction, is_effect_column)
-    if column_type == "automation" or column_type == "automation_scaling" then
+    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
         local current_value = params.getter()
         local new_value = current_value
