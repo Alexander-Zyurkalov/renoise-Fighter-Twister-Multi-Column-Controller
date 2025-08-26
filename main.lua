@@ -27,7 +27,7 @@ local EMPTY_EFFECT_COLOR = 20 -- Empty effect columns
 local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
-local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 }
+local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, 44, 45, 46, 47 }
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
 -- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount", note_column_index = 1..N, effect_column_index = 1..N }
