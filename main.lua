@@ -198,7 +198,7 @@ local COLUMN_PARAMS = {
 
             if automation:has_point_at(line) then
                 automation:remove_point_at(line)
-                automation:clear_range(line, line + 1)
+                --automation:clear_range(line, line + 1)
             end
             automation:add_point_at(line, normalized_value)
             --automation:add_point_at(line + 1, normalized_value)
@@ -282,25 +282,6 @@ local function rebuild_column_controls()
     local num_visible_note_columns = track.visible_note_columns
     local num_visible_effect_columns = track.visible_effect_columns
 
-    -- Add automation control first (always available)
-    if cc_index <= table.getn(AVAILABLE_CCS) then
-        local cc = AVAILABLE_CCS[cc_index]
-        new_column_controls[cc] = {
-            type = "automation"
-        }
-
-        new_last_controls[cc] = {
-            command = 0,
-            channel = 0,
-            control_cc = 0,
-            value = 0,
-            count = 0,
-            number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-        }
-
-        cc_index = cc_index + 1
-    end
-
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
         -- Always assign note and instrument for each column
@@ -352,6 +333,24 @@ local function rebuild_column_controls()
         if cc_index > table.getn(AVAILABLE_CCS) then
             break
         end
+    end
+
+    if cc_index <= table.getn(AVAILABLE_CCS) then
+        local cc = AVAILABLE_CCS[cc_index]
+        new_column_controls[cc] = {
+            type = "automation"
+        }
+
+        new_last_controls[cc] = {
+            command = 0,
+            channel = 0,
+            control_cc = 0,
+            value = 0,
+            count = 0,
+            number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+        }
+
+        cc_index = cc_index + 1
     end
 
     -- Assign CCs for all visible effect columns
