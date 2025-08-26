@@ -462,14 +462,14 @@ local function set_selection(column_type, column_index, is_effect_column)
         select_column = song.selected_track.visible_note_columns + column_index
     end
 
-    song.selection_in_pattern = {
-        start_line = song.selected_line_index,
-        end_line = song.selected_line_index,
-        start_track = song.selected_track_index,
-        end_track = song.selected_track_index,
-        start_column = select_column,
-        end_column = select_column,
-    }
+    --song.selection_in_pattern = {
+    --    start_line = song.selected_line_index,
+    --    end_line = song.selected_line_index,
+    --    start_track = song.selected_track_index,
+    --    end_track = song.selected_track_index,
+    --    start_column = select_column,
+    --    end_column = select_column,
+    --}
 
 end
 
@@ -590,32 +590,38 @@ end
 -- MIDI event handler
 local function midi_callback(message)
     local status = message[1]
-    local data1 = message[2] or 0  -- CC number
-    local data2 = message[3] or 0  -- CC value
+    local control_cc = message[2] or 0  -- CC number
+    local value_cc = message[3] or 0  -- CC value
 
     local channel = (status % 16) + 1
     local command = status - (status % 16)
 
-    if command == 176 and data2 == 127 or data2 == 0 then
-        if data2 == 127 then
-            if last_controls[data1] then
-                last_controls[data1].number_of_steps_to_change_value = 1
+    if command == 176 and value_cc == 127 or value_cc == 0 then
+        if value_cc == 127 then
+            if last_controls[control_cc] then
+                last_controls[control_cc].number_of_steps_to_change_value = 1
             end
-        elseif data2 == 0 then
-            if last_controls[data1] then
-                last_controls[data1].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
+        elseif value_cc == 0 then
+            local control_info = COLUMN_CONTROLS[control_cc]
+            if control_info then
+                local is_effect_column = (control_info.effect_column_index ~= nil)
+                local column_index = control_info.note_column_index or control_info.effect_column_index
+                set_selection(control_info.type, column_index, is_effect_column)
+                if last_controls[control_cc] then
+                    last_controls[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
+                end
             end
         end
-    elseif command == 176 and is_ready_to_modify(command, channel, data1) then
-        local control_info = COLUMN_CONTROLS[data1]
+    elseif command == 176 and is_ready_to_modify(command, channel, control_cc) then
+        local control_info = COLUMN_CONTROLS[control_cc]
         if control_info then
             local is_effect_column = (control_info.effect_column_index ~= nil)
             local column_index = control_info.note_column_index or control_info.effect_column_index
 
-            if data2 == INCREASE_VALUE then
-                modify_column_value(control_info.type, column_index, data1, 1, is_effect_column)
-            elseif data2 == DECREASE_VALUE then
-                modify_column_value(control_info.type, column_index, data1, -1, is_effect_column)
+            if value_cc == INCREASE_VALUE then
+                modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column)
+            elseif value_cc == DECREASE_VALUE then
+                modify_column_value(control_info.type, column_index, control_cc, -1, is_effect_column)
             end
         end
     end
