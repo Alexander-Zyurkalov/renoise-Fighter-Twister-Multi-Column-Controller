@@ -1,6 +1,6 @@
 -- MIDI Fighter Twister Multi-Column Controller for Renoise
--- Controls instrument, volume, pan, delay, FX columns, effect columns, and AUTOMATION with feedback
--- Dynamically assigns CCs to control ALL visible note columns, effect columns, and automation
+-- Controls instrument, volume, pan, delay, FX columns, effect columns, and ALL AUTOMATIONS with feedback
+-- Dynamically assigns CCs to control ALL visible note columns, effect columns, and all existing automations
 -- Sends color feedback: Green if value exists, Blue if empty, Purple for automation
 
 -- Global variables
@@ -8,6 +8,7 @@ local midi_device = nil
 local midi_output_device = nil
 local observers_attached = false
 local column_observers_attached = false
+local automation_observers_attached = false
 local position_timer = nil
 
 -- MIDI control settings
@@ -37,18 +38,22 @@ local EMPTY_AUTOMATION_COLOR = 110 -- Empty automation
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, 44, 45, 46, 47 }
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
--- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount/automation/automation_scaling", note_column_index = 1..N, effect_column_index = 1..N }
+-- Structure: COLUMN_CONTROLS[cc] = {
+--   type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount/automation/automation_scaling/automation_prev_scaling",
+--   note_column_index = 1..N,
+--   effect_column_index = 1..N,
+--   automation_parameter = renoise.DeviceParameter (for automation controls)
+-- }
 local COLUMN_CONTROLS = {}
 
--- Helper functions for automation
-local function get_automation_and_point()
-    local song = renoise.song()
-    if not song.selected_automation_parameter then
+-- Helper functions for automation with specific parameters
+local function get_automation_and_point(automation_parameter)
+    if not automation_parameter then
         return nil, nil
     end
 
-    local param = song.selected_automation_parameter
-    local automation = song.selected_pattern_track:find_automation(param)
+    local song = renoise.song()
+    local automation = song.selected_pattern_track:find_automation(automation_parameter)
     if not automation then
         return nil, nil
     end
@@ -74,14 +79,13 @@ local function get_automation_and_point()
     return automation, nil
 end
 
-local function get_automation_and_prev_point()
-    local song = renoise.song()
-    if not song.selected_automation_parameter then
+local function get_automation_and_prev_point(automation_parameter)
+    if not automation_parameter then
         return nil, nil
     end
 
-    local param = song.selected_automation_parameter
-    local automation = song.selected_pattern_track:find_automation(param)
+    local song = renoise.song()
+    local automation = song.selected_pattern_track:find_automation(automation_parameter)
     if not automation then
         return nil, nil
     end
@@ -101,18 +105,17 @@ local function get_automation_and_prev_point()
     return automation, prev_point
 end
 
-local function create_or_get_automation()
-    local song = renoise.song()
-    if not song.selected_automation_parameter then
+local function create_or_get_automation(automation_parameter)
+    if not automation_parameter then
         return nil
     end
 
-    local param = song.selected_automation_parameter
-    local automation = song.selected_pattern_track:find_automation(param)
+    local song = renoise.song()
+    local automation = song.selected_pattern_track:find_automation(automation_parameter)
 
     if not automation then
-        if param.is_automatable then
-            automation = song.selected_pattern_track:create_automation(param)
+        if automation_parameter.is_automatable then
+            automation = song.selected_pattern_track:create_automation(automation_parameter)
         else
             return nil
         end
@@ -246,36 +249,33 @@ local COLUMN_PARAMS = {
         default_value = 0
     },
     automation = {
-        getter = function()
-            local automation, point = get_automation_and_point()
+        getter = function(automation_parameter)
+            local automation, point = get_automation_and_point(automation_parameter)
             if not automation or not point then
                 return 0
             end
 
-            local song = renoise.song()
-            local param = song.selected_automation_parameter
             local value = point.value
-            local normalized_value = (value - param.value_min) / (param.value_max - param.value_min)
+            local normalized_value = (value - automation_parameter.value_min) / (automation_parameter.value_max - automation_parameter.value_min)
             return math.floor(normalized_value * 127 + 0.5) -- Scale to 0-127 range
         end,
-        setter = function(_, value, _)
-            local song = renoise.song()
-            if not song.selected_automation_parameter then
+        setter = function(automation_parameter, value, _)
+            if not automation_parameter then
                 return
             end
 
             -- Convert 0-127 value back to parameter range
             local normalized_value = value / 127
-            local param = song.selected_automation_parameter
-            local param_value = param.value_min + (normalized_value * (param.value_max - param.value_min))
+            local param_value = automation_parameter.value_min + (normalized_value * (automation_parameter.value_max - automation_parameter.value_min))
 
             -- Create or get automation
-            local automation = create_or_get_automation()
+            local automation = create_or_get_automation(automation_parameter)
             if not automation then
                 return
             end
 
             -- Add automation point at current line
+            local song = renoise.song()
             local line = song.selected_line_index
             if automation:has_point_at(line) then
                 automation:remove_point_at(line)
@@ -283,7 +283,7 @@ local COLUMN_PARAMS = {
             automation:add_point_at(line, normalized_value)
 
             -- Also update the parameter value directly
-            param.value = param_value
+            automation_parameter.value = param_value
         end,
         min_value = 0,
         max_value = 127,
@@ -291,8 +291,8 @@ local COLUMN_PARAMS = {
         default_value = 64, -- Middle value
     },
     automation_scaling = {
-        getter = function()
-            local automation, point = get_automation_and_point()
+        getter = function(automation_parameter)
+            local automation, point = get_automation_and_point(automation_parameter)
             if not automation or not point then
                 return 0
             end
@@ -303,17 +303,17 @@ local COLUMN_PARAMS = {
             local normalized_scaling = (scaling + 1.0) / 2.0  -- Map -1.0 to 1.0 -> 0.0 to 1.0
             return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
         end,
-        setter = function(_, value, _)
-            local song = renoise.song()
-            if not song.selected_automation_parameter then
+        setter = function(automation_parameter, value, _)
+            if not automation_parameter then
                 return
             end
 
-            local automation = create_or_get_automation()
+            local automation = create_or_get_automation(automation_parameter)
             if not automation then
                 return
             end
 
+            local song = renoise.song()
             local line = song.selected_line_index
 
             -- Convert 0-127 value back to scaling range (-2.0 to 2.0)
@@ -341,8 +341,8 @@ local COLUMN_PARAMS = {
         default_value = 64, -- Middle value (0.0 scaling)
     },
     automation_prev_scaling = {
-        getter = function()
-            local automation, prev_point = get_automation_and_prev_point()
+        getter = function(automation_parameter)
+            local automation, prev_point = get_automation_and_prev_point(automation_parameter)
             if not automation or not prev_point then
                 return 64  -- Default to linear scaling if no previous point
             end
@@ -352,13 +352,12 @@ local COLUMN_PARAMS = {
             local normalized_scaling = (scaling + 1.0) / 2.0  -- Map -1.0 to 1.0 -> 0.0 to 1.0
             return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
         end,
-        setter = function(_, value, _)
-            local song = renoise.song()
-            if not song.selected_automation_parameter then
+        setter = function(automation_parameter, value, _)
+            if not automation_parameter then
                 return
             end
 
-            local automation, prev_point = get_automation_and_prev_point()
+            local automation, prev_point = get_automation_and_prev_point(automation_parameter)
             if not automation or not prev_point then
                 return  -- No previous point to modify
             end
@@ -401,25 +400,22 @@ local function send_color_feedback(cc, color_value)
 end
 
 -- Function to get the appropriate color for a column type and value state
-local function get_column_color(column_type, has_value)
+local function get_column_color(column_type, has_value, automation_parameter)
     if column_type == "automation" then
-        local song = renoise.song()
-        if song.selected_automation_parameter and song.selected_automation_parameter.is_automated then
+        if automation_parameter and automation_parameter.is_automated then
             return AUTOMATION_COLOR
         else
             return EMPTY_AUTOMATION_COLOR
         end
     elseif column_type == "automation_scaling" then
-        local song = renoise.song()
-        if song.selected_automation_parameter and song.selected_automation_parameter.is_automated then
+        if automation_parameter and automation_parameter.is_automated then
             return AUTOMATION_SCALING_COLOR
         else
             return EMPTY_AUTOMATION_COLOR
         end
     elseif column_type == "automation_prev_scaling" then
-        local song = renoise.song()
-        if song.selected_automation_parameter and song.selected_automation_parameter.is_automated then
-            local automation, prev_point = get_automation_and_prev_point()
+        if automation_parameter and automation_parameter.is_automated then
+            local automation, prev_point = get_automation_and_prev_point(automation_parameter)
             if prev_point then
                 return AUTOMATION_PREV_SCALING_COLOR
             else
@@ -447,6 +443,23 @@ local function get_column_color(column_type, has_value)
     else
         return OTHER_PARAM_COLOR
     end
+end
+
+-- Function to get all existing automations on the current track
+local function get_all_track_automations()
+    local song = renoise.song()
+    local pattern_track = song.selected_pattern_track
+    local automations = {}
+
+    if pattern_track and pattern_track.automation then
+        for _, automation in ipairs(pattern_track.automation) do
+            if automation.dest_parameter then
+                table.insert(automations, automation.dest_parameter)
+            end
+        end
+    end
+
+    return automations
 end
 
 -- Function to rebuild COLUMN_CONTROLS based on current track's visible columns
@@ -556,26 +569,34 @@ local function rebuild_column_controls()
         end
     end
 
-    -- Add automation controls (prev scaling, value, and current scaling)
-    local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
-    for _, param_type in ipairs(automation_params) do
-        if cc_index <= table.getn(AVAILABLE_CCS) then
-            local cc = AVAILABLE_CCS[cc_index]
-            new_column_controls[cc] = {
-                type = param_type
-            }
+    -- Add automation controls for ALL existing automations
+    local all_automations = get_all_track_automations()
+    for _, automation_param in ipairs(all_automations) do
+        local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
+        for _, param_type in ipairs(automation_params) do
+            if cc_index <= table.getn(AVAILABLE_CCS) then
+                local cc = AVAILABLE_CCS[cc_index]
+                new_column_controls[cc] = {
+                    type = param_type,
+                    automation_parameter = automation_param
+                }
 
-            new_last_controls[cc] = {
-                command = 0,
-                channel = 0,
-                control_cc = 0,
-                value = 0,
-                count = 0,
-                number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-            }
+                new_last_controls[cc] = {
+                    command = 0,
+                    channel = 0,
+                    control_cc = 0,
+                    value = 0,
+                    count = 0,
+                    number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+                }
 
-            cc_index = cc_index + 1
-        else
+                cc_index = cc_index + 1
+            else
+                break
+            end
+        end
+
+        if cc_index > table.getn(AVAILABLE_CCS) then
             break
         end
     end
@@ -591,12 +612,8 @@ local function rebuild_column_controls()
                 col_info = " note col" .. old_control_info.note_column_index
             elseif old_control_info.effect_column_index then
                 col_info = " effect col" .. old_control_info.effect_column_index
-            elseif old_control_info.type == "automation" then
-                col_info = " automation"
-            elseif old_control_info.type == "automation_scaling" then
-                col_info = " automation scaling"
-            elseif old_control_info.type == "automation_prev_scaling" then
-                col_info = " automation prev scaling"
+            elseif old_control_info.automation_parameter then
+                col_info = " automation " .. old_control_info.automation_parameter.name
             end
             print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. col_info .. ")")
         end
@@ -613,12 +630,9 @@ local function rebuild_column_controls()
             col_info = " (note column " .. control_info.note_column_index .. ")"
         elseif control_info.effect_column_index then
             col_info = " (effect column " .. control_info.effect_column_index .. ")"
-        elseif control_info.type == "automation" then
-            col_info = " (automation value)"
-        elseif control_info.type == "automation_scaling" then
-            col_info = " (automation scaling)"
-        elseif control_info.type == "automation_prev_scaling" then
-            col_info = " (automation prev scaling)"
+        elseif control_info.automation_parameter then
+            local param_name = control_info.automation_parameter.name or "Unknown"
+            col_info = " (" .. param_name .. ")"
         end
         print("  CC" .. cc .. " -> " .. control_info.type .. col_info)
     end
@@ -665,16 +679,14 @@ local function search_backwards_for_value(column_type, column_index, current_lin
 end
 
 -- Function to check if a value exists at the current position for a given column type and column index
-local function has_value_at_current_position(column_type, column_index, is_effect_column)
+local function has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
     if column_type == "automation" or column_type == "automation_scaling" then
-        local song = renoise.song()
-        return song.selected_automation_parameter ~= nil
+        return automation_parameter ~= nil
     elseif column_type == "automation_prev_scaling" then
-        local song = renoise.song()
-        if not song.selected_automation_parameter then
+        if not automation_parameter then
             return false
         end
-        local automation, prev_point = get_automation_and_prev_point()
+        local automation, prev_point = get_automation_and_prev_point(automation_parameter)
         return prev_point ~= nil
     end
 
@@ -706,10 +718,10 @@ local function has_value_at_current_position(column_type, column_index, is_effec
 end
 
 -- Function to get current column value for a specific column
-local function get_current_column_value(column_type, column_index, is_effect_column)
+local function get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
-        return params.getter(), nil
+        return params.getter(automation_parameter), nil
     end
 
     local song = renoise.song()
@@ -748,11 +760,15 @@ local function get_current_column_value(column_type, column_index, is_effect_col
 end
 
 -- Function to set selection for a specific column
-local function set_selection(column_type, column_index, is_effect_column)
+local function set_selection(column_type, column_index, is_effect_column, automation_parameter)
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         -- Switch to automation view if not already there
         if renoise.app().window.active_lower_frame ~= renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION then
             renoise.app().window.active_lower_frame = renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION
+        end
+        -- Set the selected automation parameter
+        if automation_parameter then
+            renoise.song().selected_automation_parameter = automation_parameter
         end
         return
     end
@@ -784,13 +800,13 @@ local function set_selection(column_type, column_index, is_effect_column)
 end
 
 -- Function to map column value to MIDI range (0-127)
-local function map_to_midi_range(column_type, current_value)
+local function map_to_midi_range(column_type, current_value, automation_parameter)
     local params = COLUMN_PARAMS[column_type]
     if not params then
         return 0
     end
 
-    if column_type == "automation" or column_type == "automation_scaling" then
+    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         return current_value -- Already in 0-127 range
     end
 
@@ -808,13 +824,13 @@ local function map_to_midi_range(column_type, current_value)
 end
 
 -- Function to update MIDI controller for a specific column type and column index
-local function update_controller_for_column(column_type, column_index, cc, is_effect_column)
-    local current_value, _ = get_current_column_value(column_type, column_index, is_effect_column)
-    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
-    local color_value = get_column_color(column_type, has_value)
+local function update_controller_for_column(column_type, column_index, cc, is_effect_column, automation_parameter)
+    local current_value, _ = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
+    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
+    local color_value = get_column_color(column_type, has_value, automation_parameter)
 
     -- Map column value to MIDI range (0-127)
-    local midi_value = map_to_midi_range(column_type, current_value)
+    local midi_value = map_to_midi_range(column_type, current_value, automation_parameter)
 
     -- Send both mapped column value and color
     send_midi_feedback(cc, midi_value)
@@ -826,15 +842,16 @@ local function update_all_controllers()
     for cc, control_info in pairs(COLUMN_CONTROLS) do
         local is_effect_column = (control_info.effect_column_index ~= nil)
         local column_index = control_info.note_column_index or control_info.effect_column_index or 0
-        update_controller_for_column(control_info.type, column_index, cc, is_effect_column)
+        local automation_parameter = control_info.automation_parameter
+        update_controller_for_column(control_info.type, column_index, cc, is_effect_column, automation_parameter)
     end
 end
 
 -- Function to modify column value for a specific column
-local function modify_column_value(column_type, column_index, cc, direction, is_effect_column)
+local function modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
-        local current_value = params.getter()
+        local current_value = params.getter(automation_parameter)
         local new_value = current_value
 
         if direction > 0 then
@@ -843,18 +860,18 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
             new_value = math.max(current_value - 1, params.min_value)
         end
 
-        params.setter(nil, new_value, nil)
-        set_selection(column_type, column_index, is_effect_column)
+        params.setter(automation_parameter, new_value, nil)
+        set_selection(column_type, column_index, is_effect_column, automation_parameter)
 
         -- Send feedback
         send_midi_feedback(cc, new_value)
-        local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
-        local color_value = get_column_color(column_type, has_value)
+        local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
+        local color_value = get_column_color(column_type, has_value, automation_parameter)
         send_color_feedback(cc, color_value)
         return
     end
 
-    local current_value, column = get_current_column_value(column_type, column_index, is_effect_column)
+    local current_value, column = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
 
     if not column then
         return
@@ -880,13 +897,13 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
     end
 
     params.setter(column, new_value, column_index)
-    set_selection(column_type, column_index, is_effect_column)
+    set_selection(column_type, column_index, is_effect_column, automation_parameter)
 
     -- Send feedback with mapped MIDI value
-    local midi_value = map_to_midi_range(column_type, new_value)
+    local midi_value = map_to_midi_range(column_type, new_value, automation_parameter)
     send_midi_feedback(cc, midi_value)
-    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
-    local color_value = get_column_color(column_type, has_value)
+    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
+    local color_value = get_column_color(column_type, has_value, automation_parameter)
     send_color_feedback(cc, color_value)
 end
 
@@ -942,7 +959,8 @@ local function midi_callback(message)
             if control_info then
                 local is_effect_column = (control_info.effect_column_index ~= nil)
                 local column_index = control_info.note_column_index or control_info.effect_column_index or 0
-                set_selection(control_info.type, column_index, is_effect_column)
+                local automation_parameter = control_info.automation_parameter
+                set_selection(control_info.type, column_index, is_effect_column, automation_parameter)
                 if last_controls[control_cc] then
                     last_controls[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
                 end
@@ -953,11 +971,12 @@ local function midi_callback(message)
         if control_info then
             local is_effect_column = (control_info.effect_column_index ~= nil)
             local column_index = control_info.note_column_index or control_info.effect_column_index or 0
+            local automation_parameter = control_info.automation_parameter
 
             if value_cc == INCREASE_VALUE then
-                modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column)
+                modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column, automation_parameter)
             elseif value_cc == DECREASE_VALUE then
-                modify_column_value(control_info.type, column_index, control_cc, -1, is_effect_column)
+                modify_column_value(control_info.type, column_index, control_cc, -1, is_effect_column, automation_parameter)
             end
         end
     end
@@ -979,6 +998,44 @@ local function stop_position_timer()
         renoise.tool():remove_timer(update_all_controllers)
         position_timer = nil
     end
+end
+
+-- Function to attach automation observers
+local function attach_automation_observers()
+    if automation_observers_attached then
+        return
+    end
+
+    local song = renoise.song()
+    local pattern_track = song.selected_pattern_track
+
+    -- Add observer for automation list changes
+    if pattern_track and pattern_track.automation_observable then
+        if pattern_track.automation_observable:has_notifier(rebuild_column_controls) == false then
+            pattern_track.automation_observable:add_notifier(rebuild_column_controls)
+        end
+    end
+
+    automation_observers_attached = true
+end
+
+-- Function to detach automation observers
+local function detach_automation_observers()
+    if not automation_observers_attached then
+        return
+    end
+
+    local song = renoise.song()
+    local pattern_track = song.selected_pattern_track
+
+    -- Remove automation observers
+    if pattern_track and pattern_track.automation_observable then
+        if pattern_track.automation_observable:has_notifier(rebuild_column_controls) then
+            pattern_track.automation_observable:remove_notifier(rebuild_column_controls)
+        end
+    end
+
+    automation_observers_attached = false
 end
 
 -- Function to attach column visibility observers
@@ -1060,8 +1117,10 @@ end
 -- Function to handle track changes (need to reattach column observers)
 local function on_track_changed()
     detach_column_observers()
+    detach_automation_observers()
     rebuild_column_controls()
     attach_column_observers()
+    attach_automation_observers()
     update_all_controllers()
 end
 
@@ -1081,11 +1140,6 @@ local function attach_observers()
     -- Pattern selection changed
     if song.selected_pattern_index_observable:has_notifier(update_all_controllers) == false then
         song.selected_pattern_index_observable:add_notifier(update_all_controllers)
-    end
-
-    -- Automation parameter selection changed
-    if song.selected_automation_parameter_observable:has_notifier(update_all_controllers) == false then
-        song.selected_automation_parameter_observable:add_notifier(update_all_controllers)
     end
 
     -- Start position timer (handles line position changes)
@@ -1111,12 +1165,9 @@ local function detach_observers()
         song.selected_pattern_index_observable:remove_notifier(update_all_controllers)
     end
 
-    if song.selected_automation_parameter_observable:has_notifier(update_all_controllers) then
-        song.selected_automation_parameter_observable:remove_notifier(update_all_controllers)
-    end
-
-    -- Detach column observers
+    -- Detach column and automation observers
     detach_column_observers()
+    detach_automation_observers()
 
     -- Stop position timer
     stop_position_timer()
@@ -1164,6 +1215,7 @@ local function initialize_midi_devices()
         rebuild_column_controls()
         attach_observers()
         attach_column_observers()
+        attach_automation_observers()
         update_all_controllers() -- Send current values and colors for all columns
     end
 end
