@@ -20,15 +20,18 @@ local DEVICE_NAME = "Midi Fighter Twister"
 
 -- Color values for MIDI Fighter Twister
 local NOTE_COLOR = 50        -- Note values (to differentiate note column boundaries)
-local EMPTY_NOTE_COLOR = 30        -- Note values (to differentiate note column boundaries)
-local OTHER_PARAM_COLOR = 70 -- Other parameters (instrument, volume, pan, delay, fx)
+local EMPTY_NOTE_COLOR = 40        -- Note values (to differentiate note column boundaries)
+
+local OTHER_PARAM_COLOR = 66 -- Other parameters (instrument, volume, pan, delay, fx)
+local EMPTY_COLOR = 64         -- No value/empty
+
 local EFFECT_COLOR = 80      -- Effect columns (effect number/amount)
-local EMPTY_EFFECT_COLOR = 75 -- Empty effect columns
+local EMPTY_EFFECT_COLOR = 85 -- Empty effect columns
+
 local AUTOMATION_COLOR = 90  -- Automation control (purple/magenta)
 local AUTOMATION_SCALING_COLOR = 100  -- Automation scaling control (different purple)
 local AUTOMATION_PREV_SCALING_COLOR = 100  -- Previous point scaling control (darker purple)
 local EMPTY_AUTOMATION_COLOR = 110 -- Empty automation
-local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, 44, 45, 46, 47 }
