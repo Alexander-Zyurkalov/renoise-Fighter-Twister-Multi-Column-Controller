@@ -165,10 +165,26 @@ local COLUMN_PARAMS = {
             if not song.selected_automation_parameter then
                 return 0
             end
+            local line = song.selected_line_index
+            param = song.selected_automation_parameter
+            local automation = song.selected_pattern_track:find_automation(param)
+            local point
+            while not automation:has_point_at(line) do
+                line =  line - 1
+            end
 
-            -- Convert parameter value to 0-1 range for automation
-            local param = song.selected_automation_parameter
-            local normalized_value = (param.value - param.value_min) / (param.value_max - param.value_min)
+            for _, p in ipairs(automation.points) do
+                if p.time == line then
+                    point = p
+                    break
+                end
+            end
+            if not point then
+                return 0
+            end
+
+            local value = point.value
+            local normalized_value = (value - param.value_min) / (param.value_max - param.value_min)
             return math.floor(normalized_value * 127 + 0.5) -- Scale to 0-127 range
         end,
         setter = function(_, value, _)
