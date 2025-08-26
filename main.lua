@@ -462,14 +462,14 @@ local function set_selection(column_type, column_index, is_effect_column)
         select_column = song.selected_track.visible_note_columns + column_index
     end
 
-    --song.selection_in_pattern = {
-    --    start_line = song.selected_line_index,
-    --    end_line = song.selected_line_index,
-    --    start_track = song.selected_track_index,
-    --    end_track = song.selected_track_index,
-    --    start_column = select_column,
-    --    end_column = select_column,
-    --}
+    song.selection_in_pattern = {
+        start_line = song.selected_line_index,
+        end_line = song.selected_line_index,
+        start_track = song.selected_track_index,
+        end_track = song.selected_track_index,
+        start_column = select_column,
+        end_column = select_column,
+    }
 
 end
 
