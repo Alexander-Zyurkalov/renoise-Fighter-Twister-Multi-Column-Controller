@@ -1,7 +1,7 @@
 -- MIDI Fighter Twister Multi-Column Controller for Renoise
--- Controls instrument, volume, pan, delay, FX columns, and effect columns with feedback
--- Dynamically assigns CCs to control ALL visible note columns and effect columns
--- Sends color feedback: Green if value exists, Blue if empty
+-- Controls instrument, volume, pan, delay, FX columns, effect columns, and AUTOMATION with feedback
+-- Dynamically assigns CCs to control ALL visible note columns, effect columns, and automation
+-- Sends color feedback: Green if value exists, Blue if empty, Purple for automation
 
 -- Global variables
 local midi_device = nil
@@ -24,13 +24,15 @@ local EMPTY_NOTE_COLOR = 30        -- Note values (to differentiate note column 
 local OTHER_PARAM_COLOR = 70 -- Other parameters (instrument, volume, pan, delay, fx)
 local EFFECT_COLOR = 90      -- Effect columns (effect number/amount)
 local EMPTY_EFFECT_COLOR = 20 -- Empty effect columns
+local AUTOMATION_COLOR = 110  -- Automation control (purple/magenta)
+local EMPTY_AUTOMATION_COLOR = 45 -- Empty automation
 local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, 44, 45, 46, 47 }
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
--- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount", note_column_index = 1..N, effect_column_index = 1..N }
+-- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount/automation", note_column_index = 1..N, effect_column_index = 1..N }
 local COLUMN_CONTROLS = {}
 
 -- Column parameter configuration hash-map
@@ -156,6 +158,58 @@ local COLUMN_PARAMS = {
         max_value = 255,
         absent_value = 0,
         default_value = 0
+    },
+    automation = {
+        getter = function()
+            local song = renoise.song()
+            if not song.selected_automation_parameter then
+                return 0
+            end
+
+            -- Convert parameter value to 0-1 range for automation
+            local param = song.selected_automation_parameter
+            local normalized_value = (param.value - param.value_min) / (param.value_max - param.value_min)
+            return math.floor(normalized_value * 127 + 0.5) -- Scale to 0-127 range
+        end,
+        setter = function(_, value, _)
+            local song = renoise.song()
+
+            if not song.selected_automation_parameter then
+                return
+            end
+
+            -- Convert 0-127 value back to parameter range
+            local normalized_value = value / 127
+            local param = song.selected_automation_parameter
+            local param_value = param.value_min + (normalized_value * (param.value_max - param.value_min))
+
+            -- Create or find automation
+            local automation = song.selected_pattern_track:find_automation(param)
+            if not automation then
+                if param.is_automatable then
+                    automation = song.selected_pattern_track:create_automation(param)
+                else
+                    return
+                end
+            end
+
+            -- Add automation point at current line (similar to standard_rotary function)
+            local line = song.selected_line_index
+
+            if automation:has_point_at(line) then
+                automation:remove_point_at(line)
+                automation:clear_range(line, line + 1)
+            end
+            automation:add_point_at(line, normalized_value)
+            --automation:add_point_at(line + 1, normalized_value)
+
+            -- Also update the parameter value directly
+            param.value = param_value
+        end,
+        min_value = 0,
+        max_value = 127,
+        absent_value = -1,
+        default_value = 64, -- Middle value
     }
 }
 
@@ -181,6 +235,15 @@ end
 
 -- Function to get the appropriate color for a column type and value state
 local function get_column_color(column_type, has_value)
+    if column_type == "automation" then
+        local song = renoise.song()
+        if song.selected_automation_parameter and song.selected_automation_parameter.is_automated then
+            return AUTOMATION_COLOR
+        else
+            return EMPTY_AUTOMATION_COLOR
+        end
+    end
+
     if not has_value and column_type ~= "note" and column_type ~= "effect_number" and column_type ~= "effect_amount" then
         return EMPTY_COLOR
     end
@@ -218,6 +281,25 @@ local function rebuild_column_controls()
     local cc_index = 1
     local num_visible_note_columns = track.visible_note_columns
     local num_visible_effect_columns = track.visible_effect_columns
+
+    -- Add automation control first (always available)
+    if cc_index <= table.getn(AVAILABLE_CCS) then
+        local cc = AVAILABLE_CCS[cc_index]
+        new_column_controls[cc] = {
+            type = "automation"
+        }
+
+        new_last_controls[cc] = {
+            command = 0,
+            channel = 0,
+            control_cc = 0,
+            value = 0,
+            count = 0,
+            number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+        }
+
+        cc_index = cc_index + 1
+    end
 
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
@@ -318,6 +400,8 @@ local function rebuild_column_controls()
                 col_info = " note col" .. old_control_info.note_column_index
             elseif old_control_info.effect_column_index then
                 col_info = " effect col" .. old_control_info.effect_column_index
+            elseif old_control_info.type == "automation" then
+                col_info = " automation"
             end
             print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. col_info .. ")")
         end
@@ -334,6 +418,8 @@ local function rebuild_column_controls()
             col_info = " (note column " .. control_info.note_column_index .. ")"
         elseif control_info.effect_column_index then
             col_info = " (effect column " .. control_info.effect_column_index .. ")"
+        elseif control_info.type == "automation" then
+            col_info = " (automation control)"
         end
         print("  CC" .. cc .. " -> " .. control_info.type .. col_info)
     end
@@ -381,6 +467,11 @@ end
 
 -- Function to check if a value exists at the current position for a given column type and column index
 local function has_value_at_current_position(column_type, column_index, is_effect_column)
+    if column_type == "automation" then
+        local song = renoise.song()
+        return song.selected_automation_parameter ~= nil
+    end
+
     local song = renoise.song()
     local current_line = song.selected_line
 
@@ -410,6 +501,11 @@ end
 
 -- Function to get current column value for a specific column
 local function get_current_column_value(column_type, column_index, is_effect_column)
+    if column_type == "automation" then
+        local params = COLUMN_PARAMS.automation
+        return params.getter(), nil
+    end
+
     local song = renoise.song()
     local current_line = song.selected_line
 
@@ -444,13 +540,22 @@ local function get_current_column_value(column_type, column_index, is_effect_col
 
     return 0, nil
 end
--- Function to get current column value for a specific column
+
+-- Function to set selection for a specific column
 local function set_selection(column_type, column_index, is_effect_column)
+    if column_type == "automation" then
+        -- Switch to automation view if not already there
+        if renoise.app().window.active_lower_frame ~= renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION then
+            renoise.app().window.active_lower_frame = renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION
+        end
+        return
+    end
+
     local song = renoise.song()
     local current_line = song.selected_line
 
     if not current_line then
-        return 0
+        return
     end
     if (not is_effect_column) then
         song.selected_note_column_index = column_index
@@ -470,7 +575,6 @@ local function set_selection(column_type, column_index, is_effect_column)
         start_column = select_column,
         end_column = select_column,
     }
-
 end
 
 -- Function to map column value to MIDI range (0-127)
@@ -478,6 +582,10 @@ local function map_to_midi_range(column_type, current_value)
     local params = COLUMN_PARAMS[column_type]
     if not params then
         return 0
+    end
+
+    if column_type == "automation" then
+        return current_value -- Already in 0-127 range
     end
 
     local range = params.max_value - params.min_value
@@ -511,13 +619,35 @@ end
 local function update_all_controllers()
     for cc, control_info in pairs(COLUMN_CONTROLS) do
         local is_effect_column = (control_info.effect_column_index ~= nil)
-        local column_index = control_info.note_column_index or control_info.effect_column_index
+        local column_index = control_info.note_column_index or control_info.effect_column_index or 0
         update_controller_for_column(control_info.type, column_index, cc, is_effect_column)
     end
 end
 
 -- Function to modify column value for a specific column
 local function modify_column_value(column_type, column_index, cc, direction, is_effect_column)
+    if column_type == "automation" then
+        local params = COLUMN_PARAMS.automation
+        local current_value = params.getter()
+        local new_value = current_value
+
+        if direction > 0 then
+            new_value = math.min(current_value + 1, params.max_value)
+        else
+            new_value = math.max(current_value - 1, params.min_value)
+        end
+
+        params.setter(nil, new_value, nil)
+        set_selection(column_type, column_index, is_effect_column)
+
+        -- Send feedback
+        send_midi_feedback(cc, new_value)
+        local has_value = has_value_at_current_position(column_type, column_index, is_effect_column)
+        local color_value = get_column_color(column_type, has_value)
+        send_color_feedback(cc, color_value)
+        return
+    end
+
     local current_value, column = get_current_column_value(column_type, column_index, is_effect_column)
 
     if not column then
@@ -605,7 +735,7 @@ local function midi_callback(message)
             local control_info = COLUMN_CONTROLS[control_cc]
             if control_info then
                 local is_effect_column = (control_info.effect_column_index ~= nil)
-                local column_index = control_info.note_column_index or control_info.effect_column_index
+                local column_index = control_info.note_column_index or control_info.effect_column_index or 0
                 set_selection(control_info.type, column_index, is_effect_column)
                 if last_controls[control_cc] then
                     last_controls[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
@@ -616,7 +746,7 @@ local function midi_callback(message)
         local control_info = COLUMN_CONTROLS[control_cc]
         if control_info then
             local is_effect_column = (control_info.effect_column_index ~= nil)
-            local column_index = control_info.note_column_index or control_info.effect_column_index
+            local column_index = control_info.note_column_index or control_info.effect_column_index or 0
 
             if value_cc == INCREASE_VALUE then
                 modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column)
@@ -747,6 +877,11 @@ local function attach_observers()
         song.selected_pattern_index_observable:add_notifier(update_all_controllers)
     end
 
+    -- Automation parameter selection changed
+    if song.selected_automation_parameter_observable:has_notifier(update_all_controllers) == false then
+        song.selected_automation_parameter_observable:add_notifier(update_all_controllers)
+    end
+
     -- Start position timer (handles line position changes)
     start_position_timer()
 
@@ -768,6 +903,10 @@ local function detach_observers()
 
     if song.selected_pattern_index_observable:has_notifier(update_all_controllers) then
         song.selected_pattern_index_observable:remove_notifier(update_all_controllers)
+    end
+
+    if song.selected_automation_parameter_observable:has_notifier(update_all_controllers) then
+        song.selected_automation_parameter_observable:remove_notifier(update_all_controllers)
     end
 
     -- Detach column observers
