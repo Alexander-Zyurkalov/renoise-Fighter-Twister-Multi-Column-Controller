@@ -27,7 +27,7 @@ local EMPTY_EFFECT_COLOR = 20 -- Empty effect columns
 local EMPTY_COLOR = 0         -- No value/empty
 
 -- Available CC numbers pool (modify this list as needed)
-local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3}
+local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3 }
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
 -- Structure: COLUMN_CONTROLS[cc] = { type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount", note_column_index = 1..N, effect_column_index = 1..N }
@@ -222,7 +222,7 @@ local function rebuild_column_controls()
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
         -- Always assign note and instrument for each column
-        local column_params = {"note", "instrument"}
+        local column_params = { "note", "instrument" }
 
         -- Add optional column types if they're visible
         if track.volume_column_visible then
@@ -274,7 +274,7 @@ local function rebuild_column_controls()
 
     -- Assign CCs for all visible effect columns
     for effect_col_idx = 1, num_visible_effect_columns do
-        local effect_params = {"effect_amount"}
+        local effect_params = { "effect_amount" }
 
         -- Assign CCs for this effect column's parameters
         for _, param_type in ipairs(effect_params) do
@@ -444,6 +444,34 @@ local function get_current_column_value(column_type, column_index, is_effect_col
 
     return 0, nil
 end
+-- Function to get current column value for a specific column
+local function set_selection(column_type, column_index, is_effect_column)
+    local song = renoise.song()
+    local current_line = song.selected_line
+
+    if not current_line then
+        return 0
+    end
+    if (not is_effect_column) then
+        song.selected_note_column_index = column_index
+    else
+        song.selected_effect_column_index = column_index
+    end
+    local select_column = column_index
+    if is_effect_column then
+        select_column = song.selected_track.visible_note_columns + column_index
+    end
+
+    song.selection_in_pattern = {
+        start_line = song.selected_line_index,
+        end_line = song.selected_line_index,
+        start_track = song.selected_track_index,
+        end_track = song.selected_track_index,
+        start_column = select_column,
+        end_column = select_column,
+    }
+
+end
 
 -- Function to map column value to MIDI range (0-127)
 local function map_to_midi_range(column_type, current_value)
@@ -516,6 +544,7 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
     end
 
     params.setter(column, new_value, column_index)
+    set_selection(column_type, column_index, is_effect_column)
 
     -- Send feedback with mapped MIDI value
     local midi_value = map_to_midi_range(column_type, new_value)
