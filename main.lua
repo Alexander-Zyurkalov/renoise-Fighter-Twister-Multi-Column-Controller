@@ -22,11 +22,11 @@ local DEVICE_NAME = "Midi Fighter Twister"
 local NOTE_COLOR = 50        -- Note values (to differentiate note column boundaries)
 local EMPTY_NOTE_COLOR = 30        -- Note values (to differentiate note column boundaries)
 local OTHER_PARAM_COLOR = 70 -- Other parameters (instrument, volume, pan, delay, fx)
-local EFFECT_COLOR = 90      -- Effect columns (effect number/amount)
-local EMPTY_EFFECT_COLOR = 20 -- Empty effect columns
-local AUTOMATION_COLOR = 110  -- Automation control (purple/magenta)
+local EFFECT_COLOR = 80      -- Effect columns (effect number/amount)
+local EMPTY_EFFECT_COLOR = 75 -- Empty effect columns
+local AUTOMATION_COLOR = 90  -- Automation control (purple/magenta)
 local AUTOMATION_SCALING_COLOR = 100  -- Automation scaling control (different purple)
-local AUTOMATION_PREV_SCALING_COLOR = 90  -- Previous point scaling control (darker purple)
+local AUTOMATION_PREV_SCALING_COLOR = 100  -- Previous point scaling control (darker purple)
 local EMPTY_AUTOMATION_COLOR = 110 -- Empty automation
 local EMPTY_COLOR = 0         -- No value/empty
 
@@ -297,7 +297,7 @@ local COLUMN_PARAMS = {
             -- Scale the scaling value to 0-127 range
             -- Assuming scaling typically ranges from -2.0 to 2.0, with 0.0 being linear
             local scaling = point.scaling
-            local normalized_scaling = (scaling + 2.0) / 4.0  -- Map -2.0 to 2.0 -> 0.0 to 1.0
+            local normalized_scaling = (scaling + 1.0) / 2.0  -- Map -1.0 to 1.0 -> 0.0 to 1.0
             return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
         end,
         setter = function(_, value, _)
@@ -315,7 +315,7 @@ local COLUMN_PARAMS = {
 
             -- Convert 0-127 value back to scaling range (-2.0 to 2.0)
             local normalized_value = value / 127
-            local scaling_value = (normalized_value * 4.0) - 2.0  -- Map 0.0-1.0 -> -2.0 to 2.0
+            local scaling_value = (normalized_value * 2.0) - 1.0  -- Map 0.0-1.0 -> -1.0 to 1.0
 
             -- Get current point or create new one
             local current_point_value = 0.5  -- Default value if no point exists
@@ -346,7 +346,7 @@ local COLUMN_PARAMS = {
 
             -- Scale the scaling value to 0-127 range
             local scaling = prev_point.scaling
-            local normalized_scaling = (scaling + 2.0) / 4.0  -- Map -2.0 to 2.0 -> 0.0 to 1.0
+            local normalized_scaling = (scaling + 1.0) / 2.0  -- Map -1.0 to 1.0 -> 0.0 to 1.0
             return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
         end,
         setter = function(_, value, _)
@@ -362,7 +362,7 @@ local COLUMN_PARAMS = {
 
             -- Convert 0-127 value back to scaling range (-2.0 to 2.0)
             local normalized_value = value / 127
-            local scaling_value = (normalized_value * 4.0) - 2.0  -- Map 0.0-1.0 -> -2.0 to 2.0
+            local scaling_value = (normalized_value * 2.0) - 1.0  -- Map 0.0-1.0 -> -1.0 to 1.0
 
             -- Remove old point and add new one with updated scaling
             local prev_time = prev_point.time
@@ -518,30 +518,6 @@ local function rebuild_column_controls()
         end
     end
 
-    -- Add automation controls (prev scaling, value, and current scaling)
-    local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
-    for _, param_type in ipairs(automation_params) do
-        if cc_index <= table.getn(AVAILABLE_CCS) then
-            local cc = AVAILABLE_CCS[cc_index]
-            new_column_controls[cc] = {
-                type = param_type
-            }
-
-            new_last_controls[cc] = {
-                command = 0,
-                channel = 0,
-                control_cc = 0,
-                value = 0,
-                count = 0,
-                number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-            }
-
-            cc_index = cc_index + 1
-        else
-            break
-        end
-    end
-
     -- Assign CCs for all visible effect columns
     for effect_col_idx = 1, num_visible_effect_columns do
         local effect_params = { "effect_amount" }
@@ -573,6 +549,30 @@ local function rebuild_column_controls()
         end
 
         if cc_index > table.getn(AVAILABLE_CCS) then
+            break
+        end
+    end
+
+    -- Add automation controls (prev scaling, value, and current scaling)
+    local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
+    for _, param_type in ipairs(automation_params) do
+        if cc_index <= table.getn(AVAILABLE_CCS) then
+            local cc = AVAILABLE_CCS[cc_index]
+            new_column_controls[cc] = {
+                type = param_type
+            }
+
+            new_last_controls[cc] = {
+                command = 0,
+                channel = 0,
+                control_cc = 0,
+                value = 0,
+                count = 0,
+                number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+            }
+
+            cc_index = cc_index + 1
+        else
             break
         end
     end
