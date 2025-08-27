@@ -257,7 +257,8 @@ local COLUMN_PARAMS = {
 
             local value = point.value
             local normalized_value = (value - automation_parameter.value_min) / (automation_parameter.value_max - automation_parameter.value_min)
-            return math.floor(normalized_value * 127 + 0.5) -- Scale to 0-127 range
+            local return_value = math.floor(normalized_value * 127 + 0.5)
+            return return_value -- Scale to 0-127 range
         end,
         setter = function(automation_parameter, value, _)
             if not automation_parameter then
@@ -266,6 +267,7 @@ local COLUMN_PARAMS = {
 
             -- Convert 0-127 value back to parameter range
             local normalized_value = value / 127
+
             local param_value = automation_parameter.value_min + (normalized_value * (automation_parameter.value_max - automation_parameter.value_min))
 
             -- Create or get automation
@@ -721,7 +723,7 @@ end
 local function get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
-        return params.getter(automation_parameter), nil
+        return params.getter(automation_parameter), automation_parameter
     end
 
     local song = renoise.song()
@@ -849,33 +851,7 @@ end
 
 -- Function to modify column value for a specific column
 local function modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
-    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
-        local params = COLUMN_PARAMS[column_type]
-        local current_value = params.getter(automation_parameter)
-        local new_value = current_value
-
-        if direction > 0 then
-            new_value = math.min(current_value + 1, params.max_value)
-        else
-            new_value = math.max(current_value - 1, params.min_value)
-        end
-
-        params.setter(automation_parameter, new_value, nil)
-        set_selection(column_type, column_index, is_effect_column, automation_parameter)
-
-        -- Send feedback
-        send_midi_feedback(cc, new_value)
-        local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
-        local color_value = get_column_color(column_type, has_value, automation_parameter)
-        send_color_feedback(cc, color_value)
-        return
-    end
-
     local current_value, column = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
-
-    if not column then
-        return
-    end
 
     local params = COLUMN_PARAMS[column_type]
     if not params then
