@@ -283,9 +283,6 @@ local COLUMN_PARAMS = {
                 automation:remove_point_at(line)
             end
             automation:add_point_at(line, normalized_value)
-
-            -- Also update the parameter value directly
-            automation_parameter.value = param_value
         end,
         min_value = 0,
         max_value = 127,
