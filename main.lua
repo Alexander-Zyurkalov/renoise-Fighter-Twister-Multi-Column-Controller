@@ -250,13 +250,14 @@ local COLUMN_PARAMS = {
     },
     automation = {
         getter = function(automation_parameter)
+
             local automation, point = get_automation_and_point(automation_parameter)
             if not automation or not point then
                 return 0
             end
 
             local value = point.value
-            local normalized_value = (value - automation_parameter.value_min) / (automation_parameter.value_max - automation_parameter.value_min)
+            local normalized_value = value
             local return_value = math.floor(normalized_value * 127 + 0.5)
             return return_value -- Scale to 0-127 range
         end,
@@ -582,7 +583,6 @@ local function rebuild_column_controls()
                     type = param_type,
                     automation_parameter = automation_param
                 }
-
                 new_last_controls[cc] = {
                     command = 0,
                     channel = 0,
