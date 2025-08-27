@@ -268,7 +268,6 @@ local COLUMN_PARAMS = {
 
             -- Convert 0-127 value back to parameter range
             local normalized_value = value / 127
-
             local param_value = automation_parameter.value_min + (normalized_value * (automation_parameter.value_max - automation_parameter.value_min))
 
             -- Create or get automation
@@ -723,7 +722,12 @@ end
 local function get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
-        return params.getter(automation_parameter), automation_parameter
+        local value_quantum =  automation_parameter.value_quantum  / (automation_parameter.value_max - automation_parameter.value_min) + automation_parameter.value_min
+        local return_value_quantum =  math.ceil(value_quantum * 127)
+        if return_value_quantum == 0 then
+            return_value_quantum = 1
+        end
+        return params.getter(automation_parameter), automation_parameter, return_value_quantum
     end
 
     local song = renoise.song()
@@ -755,7 +759,7 @@ local function get_current_column_value(column_type, column_index, is_effect_col
             column_value = search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
         end
 
-        return column_value, column
+        return column_value, column, 1
     end
 
     return 0, nil
@@ -851,7 +855,7 @@ end
 
 -- Function to modify column value for a specific column
 local function modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
-    local current_value, column = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
+    local current_value, column, value_quantum = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
 
     local params = COLUMN_PARAMS[column_type]
     if not params then
@@ -861,14 +865,14 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
     local new_value = current_value
 
     if direction > 0 then
-        new_value = current_value + 1
+        new_value = current_value + value_quantum
         if new_value > params.max_value then
-            new_value = params.min_value
+            new_value = params.max_value
         end
     else
-        new_value = current_value - 1
+        new_value = current_value - value_quantum
         if new_value < params.min_value then
-            new_value = params.max_value
+            new_value = params.min_value
         end
     end
 
