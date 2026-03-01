@@ -29,6 +29,7 @@ local EMPTY_COLOR = 64         -- No value/empty
 local EFFECT_COLOR = 80      -- Effect columns (effect number/amount)
 local EMPTY_EFFECT_COLOR = 85 -- Empty effect columns
 
+local CURSOR_COLOR = 30      -- Cursor position control
 local AUTOMATION_COLOR = 90  -- Automation control (purple/magenta)
 local AUTOMATION_SCALING_COLOR = 100  -- Automation scaling control (different purple)
 local AUTOMATION_PREV_SCALING_COLOR = 100  -- Previous point scaling control (darker purple)
@@ -400,6 +401,10 @@ end
 
 -- Function to get the appropriate color for a column type and value state
 local function get_column_color(column_type, has_value, automation_parameter)
+    if column_type == "cursor" then
+        return CURSOR_COLOR
+    end
+
     if column_type == "automation" then
         if automation_parameter and automation_parameter.is_automated then
             return AUTOMATION_COLOR
@@ -480,10 +485,28 @@ local function rebuild_column_controls()
     local num_visible_note_columns = track.visible_note_columns
     local num_visible_effect_columns = track.visible_effect_columns
 
+    -- Assign first CC for cursor position control
+    if cc_index <= table.getn(AVAILABLE_CCS) then
+        local cc = AVAILABLE_CCS[cc_index]
+        new_column_controls[cc] = {
+            type = "cursor",
+            note_column_index = 1
+        }
+        new_last_controls[cc] = {
+            command = 0,
+            channel = 0,
+            control_cc = 0,
+            value = 0,
+            count = 0,
+            number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+        }
+        cc_index = cc_index + 1
+    end
+
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
-        -- Always assign note and instrument for each column
-        local column_params = { "note", "instrument" }
+        -- Always assign instrument for each column (note is replaced by cursor above)
+        local column_params = { "instrument" }
 
         -- Add optional column types if they're visible
         if track.volume_column_visible then
@@ -678,6 +701,9 @@ end
 
 -- Function to check if a value exists at the current position for a given column type and column index
 local function has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
+    if column_type == "cursor" then
+        return true -- cursor always has a value (the current line)
+    end
     if column_type == "automation" or column_type == "automation_scaling" then
         return automation_parameter ~= nil
     elseif column_type == "automation_prev_scaling" then
@@ -717,6 +743,10 @@ end
 
 -- Function to get current column value for a specific column
 local function get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
+    if column_type == "cursor" then
+        local song = renoise.song()
+        return song.selected_line_index, nil, 1
+    end
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
         local value_quantum =  automation_parameter.value_quantum  / (automation_parameter.value_max - automation_parameter.value_min) + automation_parameter.value_min
@@ -764,6 +794,9 @@ end
 
 -- Function to set selection for a specific column
 local function set_selection(column_type, column_index, is_effect_column, automation_parameter)
+    if column_type == "cursor" then
+        return -- cursor only moves line position, no column selection needed
+    end
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         -- Switch to automation view if not already there
         if renoise.app().window.active_lower_frame ~= renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION then
@@ -804,6 +837,15 @@ end
 
 -- Function to map column value to MIDI range (0-127)
 local function map_to_midi_range(column_type, current_value, automation_parameter)
+    if column_type == "cursor" then
+        -- Map line position to 0-127 range based on pattern length
+        local song = renoise.song()
+        local num_lines = song.selected_pattern.number_of_lines
+        if num_lines <= 1 then return 0 end
+        local normalized = (current_value - 1) / (num_lines - 1)
+        return math.max(0, math.min(127, math.floor(normalized * 127 + 0.5)))
+    end
+
     local params = COLUMN_PARAMS[column_type]
     if not params then
         return 0
@@ -852,6 +894,34 @@ end
 
 -- Function to modify column value for a specific column
 local function modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
+    -- Handle cursor type: move the selected line position
+    if column_type == "cursor" then
+        local song = renoise.song()
+        local current_line = song.selected_line_index
+        local num_lines = song.selected_pattern.number_of_lines
+        local new_line = current_line
+
+        if direction > 0 then
+            new_line = current_line + 1
+            if new_line > num_lines then
+                new_line = num_lines
+            end
+        else
+            new_line = current_line - 1
+            if new_line < 1 then
+                new_line = 1
+            end
+        end
+
+        song.selected_line_index = new_line
+
+        -- Send feedback
+        local midi_value = map_to_midi_range("cursor", new_line)
+        send_midi_feedback(cc, midi_value)
+        send_color_feedback(cc, CURSOR_COLOR)
+        return
+    end
+
     local current_value, column, value_quantum = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
 
     local params = COLUMN_PARAMS[column_type]
