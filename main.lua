@@ -666,36 +666,32 @@ local function search_backwards_for_value(column_type, column_index, current_lin
         return params.default_value
     end
 
-    local current_pattern = song.selected_pattern
-    local current_track = current_pattern.tracks[song.selected_track_index]
+    local track_index = song.selected_track_index
+    local pattern_sequence = song.sequencer.pattern_sequence
 
-    -- Search backwards from the previous line
-    for line_index = current_line_index - 1, 1, -1 do
-        local line = current_track:line(line_index)
-        if line then
-            local prev_column = nil
+    for seq_index = song.selected_sequence_index, 1, -1 do
+        local pattern = song:pattern(pattern_sequence[seq_index])
+        local track = pattern.tracks[track_index]
+        local from_line = (seq_index == song.selected_sequence_index)
+                and (current_line_index - 1)
+                or pattern.number_of_lines
 
-            if is_effect_column then
-                if line.effect_columns and column_index <= table.getn(line.effect_columns) then
-                    prev_column = line.effect_columns[column_index]
-                end
-            else
-                if line.note_columns and column_index <= table.getn(line.note_columns) then
-                    prev_column = line.note_columns[column_index]
-                end
-            end
-
-            if prev_column then
-                local prev_value = params.getter(prev_column)
-
-                if prev_value ~= params.absent_value then
-                    return prev_value
+        if track then
+            for line_index = from_line, 1, -1 do
+                local line = track:line(line_index)
+                if line then
+                    local columns = is_effect_column and line.effect_columns or line.note_columns
+                    if columns and column_index <= table.getn(columns) then
+                        local prev_value = params.getter(columns[column_index])
+                        if prev_value ~= params.absent_value then
+                            return prev_value
+                        end
+                    end
                 end
             end
         end
     end
 
-    -- If we still have absent value after looking back, return default
     return params.default_value
 end
 
