@@ -125,6 +125,36 @@ local function create_or_get_automation(automation_parameter)
     return automation
 end
 
+local function search_backwards(song, is_effect_column, current_line_index, column_index, params)
+    local track_index = song.selected_track_index
+    local pattern_sequence = song.sequencer.pattern_sequence
+
+    for seq_index = song.selected_sequence_index, 1, -1 do
+        local pattern = song:pattern(pattern_sequence[seq_index])
+        local track = pattern.tracks[track_index]
+        local from_line = (seq_index == song.selected_sequence_index)
+                and (current_line_index - 1)
+                or pattern.number_of_lines
+
+        if track then
+            for line_index = from_line, 1, -1 do
+                local line = track:line(line_index)
+                if line then
+                    local columns = is_effect_column and line.effect_columns or line.note_columns
+                    if columns and column_index <= table.getn(columns) then
+                        local prev_value = params.getter(columns[column_index])
+                        if prev_value ~= params.absent_value then
+                            return prev_value
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return params.default_value
+end
+
 -- Column parameter configuration hash-map
 local COLUMN_PARAMS = {
     note = {
@@ -197,20 +227,17 @@ local COLUMN_PARAMS = {
             if note_column.effect_number_value == 0 then
                 local song = renoise.song()
                 local current_line_index = song.selected_line_index
-                local current_pattern = song.selected_pattern
-                local current_track = current_pattern.tracks[song.selected_track_index]
 
-                -- Search backwards for effect_number_value in this same column
-                for line_index = current_line_index - 1, 1, -1 do
-                    local line = current_track:line(line_index)
-                    if line and line.note_columns and note_column_index <= table.getn(line.note_columns) then
-                        local prev_note_column = line.note_columns[note_column_index]
-                        if prev_note_column and prev_note_column.effect_number_value ~= 0 then
-                            note_column.effect_number_value = prev_note_column.effect_number_value
-                            break
-                        end
-                    end
-                end
+                local params = {
+                    getter = function(note_column1)
+                        return note_column1.effect_number_value
+                    end,
+                    absent_value = 0,
+                    default_value = 0,
+                }
+                local prev_effect_amount_value = search_backwards(
+                        song, false, current_line_index, note_column_index, params)
+                note_column.effect_number_value = prev_effect_amount_value
             end
         end,
         min_value = 0,
@@ -228,20 +255,14 @@ local COLUMN_PARAMS = {
             if effect_column.number_value == 0 then
                 local song = renoise.song()
                 local current_line_index = song.selected_line_index
-                local current_pattern = song.selected_pattern
-                local current_track = current_pattern.tracks[song.selected_track_index]
-
-                -- Search backwards for number_value in this same effect column
-                for line_index = current_line_index - 1, 1, -1 do
-                    local line = current_track:line(line_index)
-                    if line and line.effect_columns and effect_column_index <= table.getn(line.effect_columns) then
-                        local prev_effect_column = line.effect_columns[effect_column_index]
-                        if prev_effect_column and prev_effect_column.number_value ~= 0 then
-                            effect_column.number_value = prev_effect_column.number_value
-                            break
-                        end
-                    end
-                end
+                local params = {
+                    getter = function(effect_column1)
+                        return effect_column1.number_value
+                    end,
+                    absent_value = 0,
+                }
+                local prev_value = search_backwards(song, true, current_line_index, effect_column_index, params)
+                effect_column.number_value = prev_value
             end
         end,
         min_value = 0,
@@ -665,34 +686,7 @@ local function search_backwards_for_value(column_type, column_index, current_lin
     if not params then
         return params.default_value
     end
-
-    local track_index = song.selected_track_index
-    local pattern_sequence = song.sequencer.pattern_sequence
-
-    for seq_index = song.selected_sequence_index, 1, -1 do
-        local pattern = song:pattern(pattern_sequence[seq_index])
-        local track = pattern.tracks[track_index]
-        local from_line = (seq_index == song.selected_sequence_index)
-                and (current_line_index - 1)
-                or pattern.number_of_lines
-
-        if track then
-            for line_index = from_line, 1, -1 do
-                local line = track:line(line_index)
-                if line then
-                    local columns = is_effect_column and line.effect_columns or line.note_columns
-                    if columns and column_index <= table.getn(columns) then
-                        local prev_value = params.getter(columns[column_index])
-                        if prev_value ~= params.absent_value then
-                            return prev_value
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return params.default_value
+    return search_backwards(song, is_effect_column, current_line_index, column_index, params)
 end
 
 -- Function to check if a value exists at the current position for a given column type and column index
