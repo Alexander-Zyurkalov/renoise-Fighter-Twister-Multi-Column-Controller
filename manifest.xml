@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <RenoiseScriptingTool doc_version="0">
-    <Id>com.zyurkalov.MyBasicTool</Id>
-    <Name>MyBasic Tool</Name>
+    <Id>com.zyurkalov.FigherTwisterColumnController</Id>
+    <Name>FigherTwisterColumnController</Name>
     <Version>1.0.0</Version>
     <Author>Zyurkalov</Author>
-    <Description>This is a basic Renoise tool that does nothing.</Description>
+    <Description>A Renoise tool for controlling Renoise track columns using the Fighter Twister MIDI controller.
+    </Description>
     <ApiVersion>6.1</ApiVersion>
-    <Category>Tool Development</Category>
-    <Homepage>http://scripting.renoise.com</Homepage>
+    <Category>Midi</Category>
+    <Homepage></Homepage>
     <Icon>icon.png</Icon>
     <Platform>Windows, Mac, Linux</Platform>
 </RenoiseScriptingTool>

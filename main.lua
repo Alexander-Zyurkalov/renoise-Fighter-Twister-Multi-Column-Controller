@@ -745,8 +745,8 @@ local function get_current_column_value(column_type, column_index, is_effect_col
     end
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = COLUMN_PARAMS[column_type]
-        local value_quantum =  automation_parameter.value_quantum  / (automation_parameter.value_max - automation_parameter.value_min) + automation_parameter.value_min
-        local return_value_quantum =  math.ceil(value_quantum * 127)
+        local value_quantum = automation_parameter.value_quantum / (automation_parameter.value_max - automation_parameter.value_min) + automation_parameter.value_min
+        local return_value_quantum = math.ceil(value_quantum * 127)
         if return_value_quantum == 0 then
             return_value_quantum = 1
         end
@@ -837,7 +837,9 @@ local function map_to_midi_range(column_type, current_value, automation_paramete
         -- Map line position to 0-127 range based on pattern length
         local song = renoise.song()
         local num_lines = song.selected_pattern.number_of_lines
-        if num_lines <= 1 then return 0 end
+        if num_lines <= 1 then
+            return 0
+        end
         local normalized = (current_value - 1) / (num_lines - 1)
         return math.max(0, math.min(127, math.floor(normalized * 127 + 0.5)))
     end
@@ -1263,8 +1265,6 @@ local function initialize_midi_devices()
     end
 end
 
--- Initialize devices when tool loads
-initialize_midi_devices()
 
 -- Add menu entry to reconnect if needed
 renoise.tool():add_menu_entry {
@@ -1283,4 +1283,8 @@ renoise.tool().app_release_document_observable:add_notifier(function()
         midi_output_device:close()
         midi_output_device = nil
     end
+end)
+
+renoise.tool().app_new_document_observable:add_notifier(function()
+    initialize_midi_devices()
 end)
