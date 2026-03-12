@@ -40,7 +40,7 @@ local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
 -- Structure: COLUMN_CONTROLS[cc] = {
---   type = "note/instrument/volume/pan/delay/fx_number/fx_amount/effect_number/effect_amount/automation/automation_scaling/automation_prev_scaling",
+--   type = "note/instrument/volume/pan/delay/fx_number_xx/fx_number_yy/fx_amount/effect_number_xx/effect_number_yy/effect_amount/automation/automation_scaling/automation_prev_scaling",
 --   note_column_index = 1..N,
 --   effect_column_index = 1..N,
 --   automation_parameter = renoise.DeviceParameter (for automation controls)
@@ -205,12 +205,26 @@ local COLUMN_PARAMS = {
         absent_value = 0,
         default_value = 0,
     },
-    fx_number = {
+    fx_number_xx = {
         getter = function(note_column)
-            return note_column.effect_number_value
+            return math.floor(note_column.effect_number_value / 256)
         end,
         setter = function(note_column, value, note_column_index)
-            note_column.effect_number_value = value
+            local yy = note_column.effect_number_value % 256
+            note_column.effect_number_value = value * 256 + yy
+        end,
+        min_value = 0,
+        max_value = 35,
+        absent_value = 0,
+        default_value = 0
+    },
+    fx_number_yy = {
+        getter = function(note_column)
+            return note_column.effect_number_value % 256
+        end,
+        setter = function(note_column, value, note_column_index)
+            local xx = math.floor(note_column.effect_number_value / 256)
+            note_column.effect_number_value = xx * 256 + value
         end,
         min_value = 0,
         max_value = 35,
@@ -229,12 +243,26 @@ local COLUMN_PARAMS = {
         absent_value = 0,
         default_value = 0
     },
-    effect_number = {
+    effect_number_xx = {
         getter = function(effect_column)
-            return effect_column.number_value
+            return math.floor(effect_column.number_value / 256)
         end,
         setter = function(effect_column, value, effect_column_index)
-            effect_column.number_value = value
+            local yy = effect_column.number_value % 256
+            effect_column.number_value = value * 256 + yy
+        end,
+        min_value = 0,
+        max_value = 35,
+        absent_value = 0,
+        default_value = 0
+    },
+    effect_number_yy = {
+        getter = function(effect_column)
+            return effect_column.number_value % 256
+        end,
+        setter = function(effect_column, value, effect_column_index)
+            local xx = math.floor(effect_column.number_value / 256)
+            effect_column.number_value = xx * 256 + value
         end,
         min_value = 0,
         max_value = 35,
@@ -434,19 +462,24 @@ local function get_column_color(column_type, has_value, automation_parameter)
         end
     end
 
-    if not has_value and column_type ~= "note" and column_type ~= "effect_number" and column_type ~= "effect_amount" and column_type ~= "fx_number" and column_type ~= "fx_amount" then
+    local is_effect_type = column_type == "effect_number_xx" or column_type == "effect_number_yy"
+            or column_type == "effect_amount"
+            or column_type == "fx_number_xx" or column_type == "fx_number_yy"
+            or column_type == "fx_amount"
+
+    if not has_value and column_type ~= "note" and not is_effect_type then
         return EMPTY_COLOR
     end
     if not has_value and column_type == "note" then
         return EMPTY_NOTE_COLOR
     end
-    if not has_value and (column_type == "effect_number" or column_type == "effect_amount" or column_type == "fx_number" or column_type == "fx_amount") then
+    if not has_value and is_effect_type then
         return EMPTY_EFFECT_COLOR
     end
 
     if column_type == "note" then
         return NOTE_COLOR
-    elseif column_type == "effect_number" or column_type == "effect_amount" or column_type == "fx_number" or column_type == "fx_amount" then
+    elseif is_effect_type then
         return EFFECT_COLOR
     else
         return OTHER_PARAM_COLOR
@@ -525,7 +558,8 @@ local function rebuild_column_controls()
         end
 
         if track.sample_effects_column_visible then
-            table.insert(column_params, "fx_number")
+            table.insert(column_params, "fx_number_xx")
+            table.insert(column_params, "fx_number_yy")
             table.insert(column_params, "fx_amount")
         end
 
@@ -562,7 +596,7 @@ local function rebuild_column_controls()
 
     -- Assign CCs for all visible effect columns
     for effect_col_idx = 1, num_visible_effect_columns do
-        local effect_params = { "effect_number", "effect_amount" }
+        local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount" }
 
         -- Assign CCs for this effect column's parameters
         for _, param_type in ipairs(effect_params) do
