@@ -1,5 +1,5 @@
 -- MIDI Fighter Twister Multi-Column Controller for Renoise
--- Controls instrument, volume, pan, delay, FX columns, effect columns, and ALL AUTOMATIONS with feedback
+-- Controls instrument, volume, pan, delay, FX number/amount columns, effect number/amount columns, and ALL AUTOMATIONS with feedback
 -- Dynamically assigns CCs to control ALL visible note columns, effect columns, and all existing automations
 -- Sends color feedback: Green if value exists, Blue if empty, Purple for automation
 
@@ -40,7 +40,7 @@ local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
 -- Structure: COLUMN_CONTROLS[cc] = {
---   type = "note/instrument/volume/pan/delay/fx/effect_number/effect_amount/automation/automation_scaling/automation_prev_scaling",
+--   type = "note/instrument/volume/pan/delay/fx_number/fx_amount/effect_number/effect_amount/automation/automation_scaling/automation_prev_scaling",
 --   note_column_index = 1..N,
 --   effect_column_index = 1..N,
 --   automation_parameter = renoise.DeviceParameter (for automation controls)
@@ -169,18 +169,6 @@ local COLUMN_PARAMS = {
         absent_value = 121,
         default_value = 0,
     },
-    instrument = {
-        getter = function(note_column)
-            return note_column.instrument_value
-        end,
-        setter = function(note_column, value, note_column_index)
-            note_column.instrument_value = value
-        end,
-        min_value = 0,
-        max_value = 254,
-        absent_value = 255,
-        default_value = 0,
-    },
     volume = {
         getter = function(note_column)
             return note_column.volume_value
@@ -217,31 +205,39 @@ local COLUMN_PARAMS = {
         absent_value = 0,
         default_value = 0,
     },
-    fx = {
+    fx_number = {
+        getter = function(note_column)
+            return note_column.effect_number_value
+        end,
+        setter = function(note_column, value, note_column_index)
+            note_column.effect_number_value = value
+        end,
+        min_value = 0,
+        max_value = 35,
+        absent_value = 0,
+        default_value = 0
+    },
+    fx_amount = {
         getter = function(note_column)
             return note_column.effect_amount_value
         end,
         setter = function(note_column, value, note_column_index)
             note_column.effect_amount_value = value
-            -- Also set effect_number_value from previous effects if current is empty
-            if note_column.effect_number_value == 0 then
-                local song = renoise.song()
-                local current_line_index = song.selected_line_index
-
-                local params = {
-                    getter = function(note_column1)
-                        return note_column1.effect_number_value
-                    end,
-                    absent_value = 0,
-                    default_value = 0,
-                }
-                local prev_effect_amount_value = search_backwards(
-                        song, false, current_line_index, note_column_index, params)
-                note_column.effect_number_value = prev_effect_amount_value
-            end
         end,
         min_value = 0,
         max_value = 255,
+        absent_value = 0,
+        default_value = 0
+    },
+    effect_number = {
+        getter = function(effect_column)
+            return effect_column.number_value
+        end,
+        setter = function(effect_column, value, effect_column_index)
+            effect_column.number_value = value
+        end,
+        min_value = 0,
+        max_value = 35,
         absent_value = 0,
         default_value = 0
     },
@@ -251,19 +247,6 @@ local COLUMN_PARAMS = {
         end,
         setter = function(effect_column, value, effect_column_index)
             effect_column.amount_value = value
-            -- Also set effect number from previous effects if current is empty
-            if effect_column.number_value == 0 then
-                local song = renoise.song()
-                local current_line_index = song.selected_line_index
-                local params = {
-                    getter = function(effect_column1)
-                        return effect_column1.number_value
-                    end,
-                    absent_value = 0,
-                }
-                local prev_value = search_backwards(song, true, current_line_index, effect_column_index, params)
-                effect_column.number_value = prev_value
-            end
         end,
         min_value = 0,
         max_value = 255,
@@ -451,19 +434,19 @@ local function get_column_color(column_type, has_value, automation_parameter)
         end
     end
 
-    if not has_value and column_type ~= "note" and column_type ~= "effect_number" and column_type ~= "effect_amount" then
+    if not has_value and column_type ~= "note" and column_type ~= "effect_number" and column_type ~= "effect_amount" and column_type ~= "fx_number" and column_type ~= "fx_amount" then
         return EMPTY_COLOR
     end
     if not has_value and column_type == "note" then
         return EMPTY_NOTE_COLOR
     end
-    if not has_value and (column_type == "effect_number" or column_type == "effect_amount") then
+    if not has_value and (column_type == "effect_number" or column_type == "effect_amount" or column_type == "fx_number" or column_type == "fx_amount") then
         return EMPTY_EFFECT_COLOR
     end
 
     if column_type == "note" then
         return NOTE_COLOR
-    elseif column_type == "effect_number" or column_type == "effect_amount" then
+    elseif column_type == "effect_number" or column_type == "effect_amount" or column_type == "fx_number" or column_type == "fx_amount" then
         return EFFECT_COLOR
     else
         return OTHER_PARAM_COLOR
@@ -526,8 +509,7 @@ local function rebuild_column_controls()
 
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
-        -- Always assign instrument for each column (note is replaced by cursor above)
-        local column_params = { "instrument" }
+        local column_params = { }
 
         -- Add optional column types if they're visible
         if track.volume_column_visible then
@@ -543,7 +525,8 @@ local function rebuild_column_controls()
         end
 
         if track.sample_effects_column_visible then
-            table.insert(column_params, "fx")
+            table.insert(column_params, "fx_number")
+            table.insert(column_params, "fx_amount")
         end
 
         -- Assign CCs for this note column's parameters
@@ -579,7 +562,7 @@ local function rebuild_column_controls()
 
     -- Assign CCs for all visible effect columns
     for effect_col_idx = 1, num_visible_effect_columns do
-        local effect_params = { "effect_amount" }
+        local effect_params = { "effect_number", "effect_amount" }
 
         -- Assign CCs for this effect column's parameters
         for _, param_type in ipairs(effect_params) do
