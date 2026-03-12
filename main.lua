@@ -1,7 +1,7 @@
 -- MIDI Fighter Twister Multi-Column Controller for Renoise
--- Controls instrument, volume, pan, delay, FX number/amount columns, effect number/amount columns, and ALL AUTOMATIONS with feedback
+-- Controls volume, pan, delay, FX number/amount columns, effect number/amount columns, and ALL AUTOMATIONS with feedback
 -- Dynamically assigns CCs to control ALL visible note columns, effect columns, and all existing automations
--- Sends color feedback: Green if value exists, Blue if empty, Purple for automation
+-- Sends color feedback: Green if value exists, Blue if empty, Red for fx/effects, Purple for automation
 
 -- Global variables
 local midi_device = nil
@@ -21,13 +21,15 @@ local DEVICE_NAME = "Midi Fighter Twister"
 
 -- Color values for MIDI Fighter Twister
 local NOTE_COLOR = 50        -- Note values (to differentiate note column boundaries)
-local EMPTY_NOTE_COLOR = 40        -- Note values (to differentiate note column boundaries)
+local EMPTY_NOTE_COLOR = 40  -- Note values (to differentiate note column boundaries)
 
-local OTHER_PARAM_COLOR = 66 -- Other parameters (instrument, volume, pan, delay, fx)
-local EMPTY_COLOR = 64         -- No value/empty
+local OTHER_PARAM_COLOR = 66 -- Other parameters (volume, pan, delay)
+local EMPTY_COLOR = 64       -- No value/empty
 
-local EFFECT_COLOR = 80      -- Effect columns (effect number/amount)
-local EMPTY_EFFECT_COLOR = 85 -- Empty effect columns
+local FX_COLOR = 70                -- Red for note column fx params (number/amount)
+local EMPTY_FX_COLOR = 75          -- Empty red for note column fx params
+local EFFECT_COLOR = 80            -- Slightly different red for effect column params
+local EMPTY_EFFECT_COLOR = 85      -- Empty slightly different red for effect columns
 
 local CURSOR_COLOR = 30      -- Cursor position control
 local AUTOMATION_COLOR = 90  -- Automation control (purple/magenta)
@@ -40,12 +42,38 @@ local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28
 
 -- Dynamic column control mapping (rebuilt when visibility changes)
 -- Structure: COLUMN_CONTROLS[cc] = {
---   type = "note/instrument/volume/pan/delay/fx_number_xx/fx_number_yy/fx_amount/effect_number_xx/effect_number_yy/effect_amount/automation/automation_scaling/automation_prev_scaling",
+--   type = "note/volume/pan/delay/fx_number_xx/fx_number_yy/fx_amount_x/fx_amount_y/effect_number_xx/effect_number_yy/effect_amount_x/effect_amount_y/automation/automation_scaling/automation_prev_scaling",
 --   note_column_index = 1..N,
 --   effect_column_index = 1..N,
 --   automation_parameter = renoise.DeviceParameter (for automation controls)
 -- }
 local COLUMN_CONTROLS = {}
+
+-- Effect command definitions
+-- Maps first character value (xx byte of effect_number) to x/y nibble max values
+-- Character encoding: 0-9 = digits, 10-35 = A-Z
+-- These apply to both note column fx (effect_number_value) and effect columns (number_value)
+local EFFECT_COMMANDS = {
+    [10] = { name = "A", x_max = 15, y_max = 15 },  -- Arpeggio (xy)
+    [11] = { name = "B", x_max = 0,  y_max = 1 },   -- Backwards (00=back, 01=fwd)
+    [12] = { name = "C", x_max = 15, y_max = 15 },  -- Cut volume (xy)
+    [13] = { name = "D", x_max = 15, y_max = 15 },  -- Pitch down (xx)
+    [14] = { name = "E", x_max = 15, y_max = 15 },  -- Envelope pos (xx)
+    [16] = { name = "G", x_max = 15, y_max = 15 },  -- Glide (xx)
+    [18] = { name = "I", x_max = 15, y_max = 15 },  -- Fade in (xx)
+    [23] = { name = "N", x_max = 15, y_max = 15 },  -- Auto pan (xy)
+    [24] = { name = "O", x_max = 15, y_max = 15 },  -- Fade out (xx)
+    [28] = { name = "S", x_max = 15, y_max = 15 },  -- Trigger slice (xx)
+    [29] = { name = "T", x_max = 15, y_max = 15 },  -- Tremolo (xy)
+    [30] = { name = "U", x_max = 15, y_max = 15 },  -- Pitch up (xx)
+    [31] = { name = "V", x_max = 15, y_max = 15 },  -- Vibrato (xy)
+}
+
+-- Helper: get effect command info from a 16-bit effect_number value (0xXXYY)
+local function get_effect_command(effect_number_value)
+    local xx = math.floor(effect_number_value / 256)
+    return EFFECT_COMMANDS[xx]
+end
 
 -- Helper functions for automation with specific parameters
 local function get_automation_and_point(automation_parameter)
@@ -142,8 +170,9 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
                 if line then
                     local columns = is_effect_column and line.effect_columns or line.note_columns
                     if columns and column_index <= table.getn(columns) then
-                        local prev_value = params.getter(columns[column_index])
-                        if prev_value ~= params.absent_value then
+                        local col = columns[column_index]
+                        local prev_value = params.getter(col)
+                        if prev_value ~= params.absent_value(col) then
                             return prev_value
                         end
                     end
@@ -152,10 +181,12 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
         end
     end
 
-    return params.default_value
+    return params.default_value(nil)
 end
 
 -- Column parameter configuration hash-map
+-- All value fields (min_value, max_value, absent_value, default_value) are lambdas: function(column) -> number
+-- The column argument may be nil in some contexts (e.g. default_value at end of search_backwards)
 local COLUMN_PARAMS = {
     note = {
         getter = function(note_column)
@@ -164,10 +195,10 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.note_value = value
         end,
-        min_value = 0,
-        max_value = 120,
-        absent_value = 121,
-        default_value = 0,
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 120 end,
+        absent_value = function(_) return 121 end,
+        default_value = function(_) return 0 end,
     },
     volume = {
         getter = function(note_column)
@@ -176,10 +207,10 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.volume_value = value
         end,
-        min_value = 0,
-        max_value = 0x80,
-        absent_value = 0xFF,
-        default_value = 0,
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 0x80 end,
+        absent_value = function(_) return 0xFF end,
+        default_value = function(_) return 0 end,
     },
     pan = {
         getter = function(note_column)
@@ -188,10 +219,10 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.panning_value = value
         end,
-        min_value = 0,
-        max_value = 0x80,
-        absent_value = 0xFF,
-        default_value = 0x40, -- Center pan
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 0x80 end,
+        absent_value = function(_) return 0xFF end,
+        default_value = function(_) return 0x40 end, -- Center pan
     },
     delay = {
         getter = function(note_column)
@@ -200,11 +231,13 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.delay_value = value
         end,
-        min_value = 0,
-        max_value = 0xFF,
-        absent_value = 0,
-        default_value = 0,
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 0xFF end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
+
+    -- Note column FX: effect_number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
     fx_number_xx = {
         getter = function(note_column)
             return math.floor(note_column.effect_number_value / 256)
@@ -213,10 +246,10 @@ local COLUMN_PARAMS = {
             local yy = note_column.effect_number_value % 256
             note_column.effect_number_value = value * 256 + yy
         end,
-        min_value = 0,
-        max_value = 35,
-        absent_value = 0,
-        default_value = 0
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 35 end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
     fx_number_yy = {
         getter = function(note_column)
@@ -226,23 +259,53 @@ local COLUMN_PARAMS = {
             local xx = math.floor(note_column.effect_number_value / 256)
             note_column.effect_number_value = xx * 256 + value
         end,
-        min_value = 0,
-        max_value = 35,
-        absent_value = 0,
-        default_value = 0
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 35 end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
-    fx_amount = {
+    -- Note column FX: effect_amount_value split into high nibble (x) and low nibble (y)
+    -- Max depends on current effect command via EFFECT_COMMANDS lookup
+    fx_amount_x = {
         getter = function(note_column)
-            return note_column.effect_amount_value
+            return math.floor(note_column.effect_amount_value / 16)
         end,
         setter = function(note_column, value, note_column_index)
-            note_column.effect_amount_value = value
+            local y = note_column.effect_amount_value % 16
+            note_column.effect_amount_value = value * 16 + y
         end,
-        min_value = 0,
-        max_value = 255,
-        absent_value = 0,
-        default_value = 0
+        min_value = function(_) return 0 end,
+        max_value = function(column)
+            if column then
+                local cmd = get_effect_command(column.effect_number_value)
+                if cmd then return cmd.x_max end
+            end
+            return 15
+        end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
+    fx_amount_y = {
+        getter = function(note_column)
+            return note_column.effect_amount_value % 16
+        end,
+        setter = function(note_column, value, note_column_index)
+            local x = math.floor(note_column.effect_amount_value / 16)
+            note_column.effect_amount_value = x * 16 + value
+        end,
+        min_value = function(_) return 0 end,
+        max_value = function(column)
+            if column then
+                local cmd = get_effect_command(column.effect_number_value)
+                if cmd then return cmd.y_max end
+            end
+            return 15
+        end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
+    },
+
+    -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
     effect_number_xx = {
         getter = function(effect_column)
             return math.floor(effect_column.number_value / 256)
@@ -251,10 +314,10 @@ local COLUMN_PARAMS = {
             local yy = effect_column.number_value % 256
             effect_column.number_value = value * 256 + yy
         end,
-        min_value = 0,
-        max_value = 35,
-        absent_value = 0,
-        default_value = 0
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 35 end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
     effect_number_yy = {
         getter = function(effect_column)
@@ -264,26 +327,54 @@ local COLUMN_PARAMS = {
             local xx = math.floor(effect_column.number_value / 256)
             effect_column.number_value = xx * 256 + value
         end,
-        min_value = 0,
-        max_value = 35,
-        absent_value = 0,
-        default_value = 0
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 35 end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
-    effect_amount = {
+    -- Effect columns: amount_value split into high nibble (x) and low nibble (y)
+    -- Max depends on current effect command via EFFECT_COMMANDS lookup
+    effect_amount_x = {
         getter = function(effect_column)
-            return effect_column.amount_value
+            return math.floor(effect_column.amount_value / 16)
         end,
         setter = function(effect_column, value, effect_column_index)
-            effect_column.amount_value = value
+            local y = effect_column.amount_value % 16
+            effect_column.amount_value = value * 16 + y
         end,
-        min_value = 0,
-        max_value = 255,
-        absent_value = 0,
-        default_value = 0
+        min_value = function(_) return 0 end,
+        max_value = function(column)
+            if column then
+                local cmd = get_effect_command(column.number_value)
+                if cmd then return cmd.x_max end
+            end
+            return 15
+        end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
     },
+    effect_amount_y = {
+        getter = function(effect_column)
+            return effect_column.amount_value % 16
+        end,
+        setter = function(effect_column, value, effect_column_index)
+            local x = math.floor(effect_column.amount_value / 16)
+            effect_column.amount_value = x * 16 + value
+        end,
+        min_value = function(_) return 0 end,
+        max_value = function(column)
+            if column then
+                local cmd = get_effect_command(column.number_value)
+                if cmd then return cmd.y_max end
+            end
+            return 15
+        end,
+        absent_value = function(_) return 0 end,
+        default_value = function(_) return 0 end,
+    },
+
     automation = {
         getter = function(automation_parameter)
-
             local automation, point = get_automation_and_point(automation_parameter)
             if not automation or not point then
                 return 0
@@ -317,10 +408,10 @@ local COLUMN_PARAMS = {
             end
             automation:add_point_at(line, normalized_value)
         end,
-        min_value = 0,
-        max_value = 127,
-        absent_value = -1,
-        default_value = 64, -- Middle value
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 127 end,
+        absent_value = function(_) return -1 end,
+        default_value = function(_) return 64 end, -- Middle value
     },
     automation_scaling = {
         getter = function(automation_parameter)
@@ -329,10 +420,8 @@ local COLUMN_PARAMS = {
                 return 0
             end
 
-            -- Scale the scaling value to 0-127 range
-            -- Assuming scaling typically ranges from -2.0 to 2.0, with 0.0 being linear
             local scaling = point.scaling
-            local normalized_scaling = (scaling + 1.0) / 2.0  -- Map -1.0 to 1.0 -> 0.0 to 1.0
+            local normalized_scaling = (scaling + 1.0) / 2.0
             return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
         end,
         setter = function(automation_parameter, value, _)
@@ -348,12 +437,10 @@ local COLUMN_PARAMS = {
             local song = renoise.song()
             local line = song.selected_line_index
 
-            -- Convert 0-127 value back to scaling range (-2.0 to 2.0)
             local normalized_value = value / 127
-            local scaling_value = (normalized_value * 2.0) - 1.0  -- Map 0.0-1.0 -> -1.0 to 1.0
+            local scaling_value = (normalized_value * 2.0) - 1.0
 
-            -- Get current point or create new one
-            local current_point_value = 0.5  -- Default value if no point exists
+            local current_point_value = 0.5
             if automation:has_point_at(line) then
                 for _, point in ipairs(automation.points) do
                     if point.time == line then
@@ -364,24 +451,22 @@ local COLUMN_PARAMS = {
                 automation:remove_point_at(line)
             end
 
-            -- Add point with new scaling but preserve current value
             automation:add_point_at(line, current_point_value, scaling_value)
         end,
-        min_value = 0,
-        max_value = 127,
-        absent_value = -1,
-        default_value = 64, -- Middle value (0.0 scaling)
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 127 end,
+        absent_value = function(_) return -1 end,
+        default_value = function(_) return 64 end,
     },
     automation_prev_scaling = {
         getter = function(automation_parameter)
             local automation, prev_point = get_automation_and_prev_point(automation_parameter)
             if not automation or not prev_point then
-                return 64  -- Default to linear scaling if no previous point
+                return 64
             end
 
-            -- Scale the scaling value to 0-127 range
             local scaling = prev_point.scaling
-            local normalized_scaling = (scaling + 1.0) / 2.0  -- Map -1.0 to 1.0 -> 0.0 to 1.0
+            local normalized_scaling = (scaling + 1.0) / 2.0
             return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
         end,
         setter = function(automation_parameter, value, _)
@@ -391,23 +476,21 @@ local COLUMN_PARAMS = {
 
             local automation, prev_point = get_automation_and_prev_point(automation_parameter)
             if not automation or not prev_point then
-                return  -- No previous point to modify
+                return
             end
 
-            -- Convert 0-127 value back to scaling range (-2.0 to 2.0)
             local normalized_value = value / 127
-            local scaling_value = (normalized_value * 2.0) - 1.0  -- Map 0.0-1.0 -> -1.0 to 1.0
+            local scaling_value = (normalized_value * 2.0) - 1.0
 
-            -- Remove old point and add new one with updated scaling
             local prev_time = prev_point.time
             local prev_value = prev_point.value
             automation:remove_point_at(prev_time)
             automation:add_point_at(prev_time, prev_value, scaling_value)
         end,
-        min_value = 0,
-        max_value = 127,
-        absent_value = -1,
-        default_value = 64, -- Middle value (0.0 scaling)
+        min_value = function(_) return 0 end,
+        max_value = function(_) return 127 end,
+        absent_value = function(_) return -1 end,
+        default_value = function(_) return 64 end,
     }
 }
 
@@ -462,23 +545,30 @@ local function get_column_color(column_type, has_value, automation_parameter)
         end
     end
 
-    local is_effect_type = column_type == "effect_number_xx" or column_type == "effect_number_yy"
-            or column_type == "effect_amount"
-            or column_type == "fx_number_xx" or column_type == "fx_number_yy"
-            or column_type == "fx_amount"
+    -- Note column fx params (red)
+    local is_fx_type = column_type == "fx_number_xx" or column_type == "fx_number_yy"
+            or column_type == "fx_amount_x" or column_type == "fx_amount_y"
 
-    if not has_value and column_type ~= "note" and not is_effect_type then
-        return EMPTY_COLOR
-    end
-    if not has_value and column_type == "note" then
-        return EMPTY_NOTE_COLOR
-    end
-    if not has_value and is_effect_type then
-        return EMPTY_EFFECT_COLOR
+    -- Effect column params (slightly different red)
+    local is_effect_type = column_type == "effect_number_xx" or column_type == "effect_number_yy"
+            or column_type == "effect_amount_x" or column_type == "effect_amount_y"
+
+    if not has_value then
+        if column_type == "note" then
+            return EMPTY_NOTE_COLOR
+        elseif is_fx_type then
+            return EMPTY_FX_COLOR
+        elseif is_effect_type then
+            return EMPTY_EFFECT_COLOR
+        else
+            return EMPTY_COLOR
+        end
     end
 
     if column_type == "note" then
         return NOTE_COLOR
+    elseif is_fx_type then
+        return FX_COLOR
     elseif is_effect_type then
         return EFFECT_COLOR
     else
@@ -542,7 +632,7 @@ local function rebuild_column_controls()
 
     -- Assign CCs for all visible note columns
     for note_col_idx = 1, num_visible_note_columns do
-        local column_params = { }
+        local column_params = {}
 
         -- Add optional column types if they're visible
         if track.volume_column_visible then
@@ -560,7 +650,8 @@ local function rebuild_column_controls()
         if track.sample_effects_column_visible then
             table.insert(column_params, "fx_number_xx")
             table.insert(column_params, "fx_number_yy")
-            table.insert(column_params, "fx_amount")
+            table.insert(column_params, "fx_amount_x")
+            table.insert(column_params, "fx_amount_y")
         end
 
         -- Assign CCs for this note column's parameters
@@ -596,7 +687,7 @@ local function rebuild_column_controls()
 
     -- Assign CCs for all visible effect columns
     for effect_col_idx = 1, num_visible_effect_columns do
-        local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount" }
+        local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount_x", "effect_amount_y" }
 
         -- Assign CCs for this effect column's parameters
         for _, param_type in ipairs(effect_params) do
@@ -701,7 +792,7 @@ end
 local function search_backwards_for_value(column_type, column_index, current_line_index, song, is_effect_column)
     local params = COLUMN_PARAMS[column_type]
     if not params then
-        return params.default_value
+        return 0
     end
     return search_backwards(song, is_effect_column, current_line_index, column_index, params)
 end
@@ -741,7 +832,7 @@ local function has_value_at_current_position(column_type, column_index, is_effec
 
         if params then
             local value = params.getter(column)
-            return value ~= params.absent_value
+            return value ~= params.absent_value(column)
         end
     end
 
@@ -789,7 +880,7 @@ local function get_current_column_value(column_type, column_index, is_effect_col
         local column_value = params.getter(column)
 
         -- Handle empty values by looking back through previous lines
-        if column_value == params.absent_value then
+        if column_value == params.absent_value(column) then
             column_value = search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
         end
 
@@ -843,7 +934,8 @@ local function set_selection(column_type, column_index, is_effect_column, automa
 end
 
 -- Function to map column value to MIDI range (0-127)
-local function map_to_midi_range(column_type, current_value, automation_parameter)
+-- column parameter is needed for lambda fields; may be nil for cursor/automation types
+local function map_to_midi_range(column_type, current_value, automation_parameter, column)
     if column_type == "cursor" then
         -- Map line position to 0-127 range based on pattern length
         local song = renoise.song()
@@ -864,13 +956,15 @@ local function map_to_midi_range(column_type, current_value, automation_paramete
         return current_value -- Already in 0-127 range
     end
 
-    local range = params.max_value - params.min_value
+    local max_val = params.max_value(column)
+    local min_val = params.min_value(column)
+    local range = max_val - min_val
     if range <= 0 then
         return 0
     end
 
     -- Map the value from column range to MIDI range (0-127)
-    local normalized_value = (current_value - params.min_value) / range
+    local normalized_value = (current_value - min_val) / range
     local midi_value = math.floor(normalized_value * 127 + 0.5) -- Round to nearest integer
 
     -- Clamp to MIDI range
@@ -879,12 +973,12 @@ end
 
 -- Function to update MIDI controller for a specific column type and column index
 local function update_controller_for_column(column_type, column_index, cc, is_effect_column, automation_parameter)
-    local current_value, _ = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
+    local current_value, column = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
     local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
     local color_value = get_column_color(column_type, has_value, automation_parameter)
 
     -- Map column value to MIDI range (0-127)
-    local midi_value = map_to_midi_range(column_type, current_value, automation_parameter)
+    local midi_value = map_to_midi_range(column_type, current_value, automation_parameter, column)
 
     -- Send both mapped column value and color
     send_midi_feedback(cc, midi_value)
@@ -925,7 +1019,7 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
         song.selected_line_index = new_line
 
         -- Send feedback
-        local midi_value = map_to_midi_range("cursor", new_line)
+        local midi_value = map_to_midi_range("cursor", new_line, nil, nil)
         send_midi_feedback(cc, midi_value)
         send_color_feedback(cc, CURSOR_COLOR)
         return
@@ -938,17 +1032,19 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
         return
     end
 
+    local max_val = params.max_value(column)
+    local min_val = params.min_value(column)
     local new_value = current_value
 
     if direction > 0 then
         new_value = current_value + value_quantum
-        if new_value > params.max_value then
-            new_value = params.max_value
+        if new_value > max_val then
+            new_value = max_val
         end
     else
         new_value = current_value - value_quantum
-        if new_value < params.min_value then
-            new_value = params.min_value
+        if new_value < min_val then
+            new_value = min_val
         end
     end
 
@@ -956,7 +1052,7 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
     set_selection(column_type, column_index, is_effect_column, automation_parameter)
 
     -- Send feedback with mapped MIDI value
-    local midi_value = map_to_midi_range(column_type, new_value, automation_parameter)
+    local midi_value = map_to_midi_range(column_type, new_value, automation_parameter, column)
     send_midi_feedback(cc, midi_value)
     local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
     local color_value = get_column_color(column_type, has_value, automation_parameter)
