@@ -54,19 +54,19 @@ local COLUMN_CONTROLS = {}
 -- Character encoding: 0-9 = digits, 10-35 = A-Z
 -- These apply to both note column fx (effect_number_value) and effect columns (number_value)
 local EFFECT_COMMANDS = {
-    [10] = { name = "A", x_max = 15, y_max = 15 },  -- Arpeggio (xy)
-    [11] = { name = "B", x_max = 0,  y_max = 1 },   -- Backwards (00=back, 01=fwd)
-    [12] = { name = "C", x_max = 15, y_max = 15 },  -- Cut volume (xy)
-    [13] = { name = "D", x_max = 15, y_max = 15 },  -- Pitch down (xx)
-    [14] = { name = "E", x_max = 15, y_max = 15 },  -- Envelope pos (xx)
-    [16] = { name = "G", x_max = 15, y_max = 15 },  -- Glide (xx)
-    [18] = { name = "I", x_max = 15, y_max = 15 },  -- Fade in (xx)
-    [23] = { name = "N", x_max = 15, y_max = 15 },  -- Auto pan (xy)
-    [24] = { name = "O", x_max = 15, y_max = 15 },  -- Fade out (xx)
-    [28] = { name = "S", x_max = 15, y_max = 15 },  -- Trigger slice (xx)
-    [29] = { name = "T", x_max = 15, y_max = 15 },  -- Tremolo (xy)
-    [30] = { name = "U", x_max = 15, y_max = 15 },  -- Pitch up (xx)
-    [31] = { name = "V", x_max = 15, y_max = 15 },  -- Vibrato (xy)
+    [10] = { name = "A", is_xy = true,  x_max = 15, y_max = 15 },  -- Arpeggio (xy)
+    [11] = { name = "B", is_xy = false, max = 1 },                   -- Backwards (00=back, 01=fwd)
+    [12] = { name = "C", is_xy = true,  x_max = 15, y_max = 15 },  -- Cut volume (xy)
+    [13] = { name = "D", is_xy = false, max = 255 },                 -- Pitch down (xx)
+    [14] = { name = "E", is_xy = false, max = 255 },                 -- Envelope pos (xx)
+    [16] = { name = "G", is_xy = false, max = 255 },                 -- Glide (xx)
+    [18] = { name = "I", is_xy = false, max = 255 },                 -- Fade in (xx)
+    [23] = { name = "N", is_xy = true,  x_max = 15, y_max = 15 },  -- Auto pan (xy)
+    [24] = { name = "O", is_xy = false, max = 255 },                 -- Fade out (xx)
+    [28] = { name = "S", is_xy = false, max = 255 },                 -- Trigger slice (xx)
+    [29] = { name = "T", is_xy = true,  x_max = 15, y_max = 15 },  -- Tremolo (xy)
+    [30] = { name = "U", is_xy = false, max = 255 },                 -- Pitch up (xx)
+    [31] = { name = "V", is_xy = true,  x_max = 15, y_max = 15 },  -- Vibrato (xy)
 }
 
 -- Helper: get effect command info from a 16-bit effect_number value (0xXXYY)
@@ -264,42 +264,63 @@ local COLUMN_PARAMS = {
         absent_value = function(_) return 0 end,
         default_value = function(_) return 0 end,
     },
-    -- Note column FX: effect_amount_value split into high nibble (x) and low nibble (y)
-    -- Max depends on current effect command via EFFECT_COMMANDS lookup
+    -- Note column FX: effect_amount_value
+    -- For xy effects: split into high nibble (x) and low nibble (y)
+    -- For xx effects: amount_x controls full byte, amount_y is disabled
     fx_amount_x = {
         getter = function(note_column)
-            return math.floor(note_column.effect_amount_value / 16)
+            local cmd = get_effect_command(note_column.effect_number_value)
+            if cmd and cmd.is_xy then
+                return math.floor(note_column.effect_amount_value / 16)
+            else
+                return note_column.effect_amount_value
+            end
         end,
         setter = function(note_column, value, note_column_index)
-            local y = note_column.effect_amount_value % 16
-            note_column.effect_amount_value = value * 16 + y
+            local cmd = get_effect_command(note_column.effect_number_value)
+            if cmd and cmd.is_xy then
+                local y = note_column.effect_amount_value % 16
+                note_column.effect_amount_value = value * 16 + y
+            else
+                note_column.effect_amount_value = value
+            end
         end,
         min_value = function(_) return 0 end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.effect_number_value)
-                if cmd then return cmd.x_max end
+                if cmd then
+                    if cmd.is_xy then return cmd.x_max end
+                    return cmd.max
+                end
             end
-            return 15
+            return 255
         end,
         absent_value = function(_) return 0 end,
         default_value = function(_) return 0 end,
     },
     fx_amount_y = {
         getter = function(note_column)
-            return note_column.effect_amount_value % 16
+            local cmd = get_effect_command(note_column.effect_number_value)
+            if cmd and cmd.is_xy then
+                return note_column.effect_amount_value % 16
+            end
+            return 0
         end,
         setter = function(note_column, value, note_column_index)
-            local x = math.floor(note_column.effect_amount_value / 16)
-            note_column.effect_amount_value = x * 16 + value
+            local cmd = get_effect_command(note_column.effect_number_value)
+            if cmd and cmd.is_xy then
+                local x = math.floor(note_column.effect_amount_value / 16)
+                note_column.effect_amount_value = x * 16 + value
+            end
         end,
         min_value = function(_) return 0 end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.effect_number_value)
-                if cmd then return cmd.y_max end
+                if cmd and cmd.is_xy then return cmd.y_max end
             end
-            return 15
+            return 0
         end,
         absent_value = function(_) return 0 end,
         default_value = function(_) return 0 end,
@@ -332,42 +353,63 @@ local COLUMN_PARAMS = {
         absent_value = function(_) return 0 end,
         default_value = function(_) return 0 end,
     },
-    -- Effect columns: amount_value split into high nibble (x) and low nibble (y)
-    -- Max depends on current effect command via EFFECT_COMMANDS lookup
+    -- Effect columns: amount_value
+    -- For xy effects: split into high nibble (x) and low nibble (y)
+    -- For xx effects: amount_x controls full byte, amount_y is disabled
     effect_amount_x = {
         getter = function(effect_column)
-            return math.floor(effect_column.amount_value / 16)
+            local cmd = get_effect_command(effect_column.number_value)
+            if cmd and cmd.is_xy then
+                return math.floor(effect_column.amount_value / 16)
+            else
+                return effect_column.amount_value
+            end
         end,
         setter = function(effect_column, value, effect_column_index)
-            local y = effect_column.amount_value % 16
-            effect_column.amount_value = value * 16 + y
+            local cmd = get_effect_command(effect_column.number_value)
+            if cmd and cmd.is_xy then
+                local y = effect_column.amount_value % 16
+                effect_column.amount_value = value * 16 + y
+            else
+                effect_column.amount_value = value
+            end
         end,
         min_value = function(_) return 0 end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.number_value)
-                if cmd then return cmd.x_max end
+                if cmd then
+                    if cmd.is_xy then return cmd.x_max end
+                    return cmd.max
+                end
             end
-            return 15
+            return 255
         end,
         absent_value = function(_) return 0 end,
         default_value = function(_) return 0 end,
     },
     effect_amount_y = {
         getter = function(effect_column)
-            return effect_column.amount_value % 16
+            local cmd = get_effect_command(effect_column.number_value)
+            if cmd and cmd.is_xy then
+                return effect_column.amount_value % 16
+            end
+            return 0
         end,
         setter = function(effect_column, value, effect_column_index)
-            local x = math.floor(effect_column.amount_value / 16)
-            effect_column.amount_value = x * 16 + value
+            local cmd = get_effect_command(effect_column.number_value)
+            if cmd and cmd.is_xy then
+                local x = math.floor(effect_column.amount_value / 16)
+                effect_column.amount_value = x * 16 + value
+            end
         end,
         min_value = function(_) return 0 end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.number_value)
-                if cmd then return cmd.y_max end
+                if cmd and cmd.is_xy then return cmd.y_max end
             end
-            return 15
+            return 0
         end,
         absent_value = function(_) return 0 end,
         default_value = function(_) return 0 end,
