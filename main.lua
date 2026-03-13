@@ -223,23 +223,6 @@ local function get_column_color(column_type, has_value, automation_parameter)
     end
 end
 
--- Function to get all existing automations on the current track
-local function get_all_track_automations()
-    local song = renoise.song()
-    local pattern_track = song.selected_pattern_track
-    local automations = {}
-
-    if pattern_track and pattern_track.automation then
-        for _, automation in ipairs(pattern_track.automation) do
-            if automation.dest_parameter then
-                table.insert(automations, automation.dest_parameter)
-            end
-        end
-    end
-
-    return automations
-end
-
 -- Function to rebuild COLUMN_CONTROLS based on current track's visible columns
 local function rebuild_column_controls()
     local song = renoise.song()
@@ -368,7 +351,7 @@ local function rebuild_column_controls()
     end
 
     -- Add automation controls for ALL existing automations
-    local all_automations = get_all_track_automations()
+    local all_automations = AutomationHelpers.get_all_track_automations()
     for _, automation_param in ipairs(all_automations) do
         local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
         for _, param_type in ipairs(automation_params) do

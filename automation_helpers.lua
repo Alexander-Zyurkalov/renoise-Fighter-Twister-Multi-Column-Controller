@@ -79,4 +79,21 @@ function AutomationHelpers.create_or_get_automation(automation_parameter)
     return automation
 end
 
+-- Function to get all existing automations on the current track
+function AutomationHelpers.get_all_track_automations()
+    local song = renoise.song()
+    local pattern_track = song.selected_pattern_track
+    local automations = {}
+
+    if pattern_track and pattern_track.automation then
+        for _, automation in ipairs(pattern_track.automation) do
+            if automation.dest_parameter then
+                table.insert(automations, automation.dest_parameter)
+            end
+        end
+    end
+
+    return automations
+end
+
 return AutomationHelpers
