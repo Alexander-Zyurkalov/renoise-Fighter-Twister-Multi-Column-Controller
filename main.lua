@@ -49,31 +49,6 @@ local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28
 -- }
 local COLUMN_CONTROLS = {}
 
--- Effect command definitions
--- Maps first character value (xx byte of effect_number) to x/y nibble max values
--- Character encoding: 0-9 = digits, 10-35 = A-Z
--- These apply to both note column fx (effect_number_value) and effect columns (number_value)
-local EFFECT_COMMANDS = {
-    [10] = { name = "A", is_xy = true, x_max = 15, y_max = 15 }, -- Arpeggio (xy)
-    [11] = { name = "B", is_xy = false, max = 1 }, -- Backwards (00=back, 01=fwd)
-    [12] = { name = "C", is_xy = true, x_max = 15, y_max = 15 }, -- Cut volume (xy)
-    [13] = { name = "D", is_xy = false, max = 255 }, -- Pitch down (xx)
-    [14] = { name = "E", is_xy = false, max = 255 }, -- Envelope pos (xx)
-    [16] = { name = "G", is_xy = false, max = 255 }, -- Glide (xx)
-    [18] = { name = "I", is_xy = false, max = 255 }, -- Fade in (xx)
-    [23] = { name = "N", is_xy = true, x_max = 15, y_max = 15 }, -- Auto pan (xy)
-    [24] = { name = "O", is_xy = false, max = 255 }, -- Fade out (xx)
-    [28] = { name = "S", is_xy = false, max = 255 }, -- Trigger slice (xx)
-    [29] = { name = "T", is_xy = true, x_max = 15, y_max = 15 }, -- Tremolo (xy)
-    [30] = { name = "U", is_xy = false, max = 255 }, -- Pitch up (xx)
-    [31] = { name = "V", is_xy = true, x_max = 15, y_max = 15 }, -- Vibrato (xy)
-}
-
--- Helper: get effect command info from a 16-bit effect_number value (0xXXYY)
-local function get_effect_command(effect_number_value)
-    local xx = math.floor(effect_number_value / 256)
-    return EFFECT_COMMANDS[xx]
-end
 
 -- Helper functions for automation with specific parameters
 local function get_automation_and_point(automation_parameter)
@@ -220,13 +195,11 @@ local COLUMN_PARAMS = {
         number_property    = "effect_number_value",
         amount_property    = "effect_amount_value",
         is_high_nibble     = true,
-        get_effect_command = get_effect_command,
     }),
     fx_amount_y = AmountNibbleParam.new({
         number_property    = "effect_number_value",
         amount_property    = "effect_amount_value",
         is_high_nibble     = false,
-        get_effect_command = get_effect_command,
     }),
 
     -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
@@ -240,13 +213,11 @@ local COLUMN_PARAMS = {
         number_property    = "number_value",
         amount_property    = "amount_value",
         is_high_nibble     = true,
-        get_effect_command = get_effect_command,
     }),
     effect_amount_y = AmountNibbleParam.new({
         number_property    = "number_value",
         amount_property    = "amount_value",
         is_high_nibble     = false,
-        get_effect_command = get_effect_command,
     }),
 
     automation = AutomationValueParam.new(automation_helpers),
