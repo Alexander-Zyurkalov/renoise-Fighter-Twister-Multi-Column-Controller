@@ -54,19 +54,19 @@ local COLUMN_CONTROLS = {}
 -- Character encoding: 0-9 = digits, 10-35 = A-Z
 -- These apply to both note column fx (effect_number_value) and effect columns (number_value)
 local EFFECT_COMMANDS = {
-    [10] = { name = "A", is_xy = true,  x_max = 15, y_max = 15 },  -- Arpeggio (xy)
-    [11] = { name = "B", is_xy = false, max = 1 },                   -- Backwards (00=back, 01=fwd)
-    [12] = { name = "C", is_xy = true,  x_max = 15, y_max = 15 },  -- Cut volume (xy)
-    [13] = { name = "D", is_xy = false, max = 255 },                 -- Pitch down (xx)
-    [14] = { name = "E", is_xy = false, max = 255 },                 -- Envelope pos (xx)
-    [16] = { name = "G", is_xy = false, max = 255 },                 -- Glide (xx)
-    [18] = { name = "I", is_xy = false, max = 255 },                 -- Fade in (xx)
-    [23] = { name = "N", is_xy = true,  x_max = 15, y_max = 15 },  -- Auto pan (xy)
-    [24] = { name = "O", is_xy = false, max = 255 },                 -- Fade out (xx)
-    [28] = { name = "S", is_xy = false, max = 255 },                 -- Trigger slice (xx)
-    [29] = { name = "T", is_xy = true,  x_max = 15, y_max = 15 },  -- Tremolo (xy)
-    [30] = { name = "U", is_xy = false, max = 255 },                 -- Pitch up (xx)
-    [31] = { name = "V", is_xy = true,  x_max = 15, y_max = 15 },  -- Vibrato (xy)
+    [10] = { name = "A", is_xy = true, x_max = 15, y_max = 15 }, -- Arpeggio (xy)
+    [11] = { name = "B", is_xy = false, max = 1 }, -- Backwards (00=back, 01=fwd)
+    [12] = { name = "C", is_xy = true, x_max = 15, y_max = 15 }, -- Cut volume (xy)
+    [13] = { name = "D", is_xy = false, max = 255 }, -- Pitch down (xx)
+    [14] = { name = "E", is_xy = false, max = 255 }, -- Envelope pos (xx)
+    [16] = { name = "G", is_xy = false, max = 255 }, -- Glide (xx)
+    [18] = { name = "I", is_xy = false, max = 255 }, -- Fade in (xx)
+    [23] = { name = "N", is_xy = true, x_max = 15, y_max = 15 }, -- Auto pan (xy)
+    [24] = { name = "O", is_xy = false, max = 255 }, -- Fade out (xx)
+    [28] = { name = "S", is_xy = false, max = 255 }, -- Trigger slice (xx)
+    [29] = { name = "T", is_xy = true, x_max = 15, y_max = 15 }, -- Tremolo (xy)
+    [30] = { name = "U", is_xy = false, max = 255 }, -- Pitch up (xx)
+    [31] = { name = "V", is_xy = true, x_max = 15, y_max = 15 }, -- Vibrato (xy)
 }
 
 -- Helper: get effect command info from a 16-bit effect_number value (0xXXYY)
@@ -195,10 +195,18 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.note_value = value
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 120 end,
-        absent_value = function(_) return 121 end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 120
+        end,
+        absent_value = function(_)
+            return 121
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     volume = {
         getter = function(note_column)
@@ -207,10 +215,18 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.volume_value = value
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 0x80 end,
-        absent_value = function(_) return 0xFF end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 0x80
+        end,
+        absent_value = function(_)
+            return 0xFF
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     pan = {
         getter = function(note_column)
@@ -219,10 +235,18 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.panning_value = value
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 0x80 end,
-        absent_value = function(_) return 0xFF end,
-        default_value = function(_) return 0x40 end, -- Center pan
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 0x80
+        end,
+        absent_value = function(_)
+            return 0xFF
+        end,
+        default_value = function(_)
+            return 0x40
+        end, -- Center pan
     },
     delay = {
         getter = function(note_column)
@@ -231,10 +255,18 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.delay_value = value
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 0xFF end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 0xFF
+        end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
 
     -- Note column FX: effect_number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
@@ -246,10 +278,18 @@ local COLUMN_PARAMS = {
             local yy = note_column.effect_number_value % 256
             note_column.effect_number_value = value * 256 + yy
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 35 end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 35
+        end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     fx_number_yy = {
         getter = function(note_column)
@@ -259,10 +299,18 @@ local COLUMN_PARAMS = {
             local xx = math.floor(note_column.effect_number_value / 256)
             note_column.effect_number_value = xx * 256 + value
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 35 end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 35
+        end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     -- Note column FX: effect_amount_value
     -- For xy effects: split into high nibble (x) and low nibble (y)
@@ -285,19 +333,27 @@ local COLUMN_PARAMS = {
                 note_column.effect_amount_value = value
             end
         end,
-        min_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.effect_number_value)
                 if cmd then
-                    if cmd.is_xy then return cmd.x_max end
+                    if cmd.is_xy then
+                        return cmd.x_max
+                    end
                     return cmd.max
                 end
             end
             return 255
         end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     fx_amount_y = {
         getter = function(note_column)
@@ -314,16 +370,24 @@ local COLUMN_PARAMS = {
                 note_column.effect_amount_value = x * 16 + value
             end
         end,
-        min_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.effect_number_value)
-                if cmd and cmd.is_xy then return cmd.y_max end
+                if cmd and cmd.is_xy then
+                    return cmd.y_max
+                end
             end
             return 0
         end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
 
     -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
@@ -335,10 +399,18 @@ local COLUMN_PARAMS = {
             local yy = effect_column.number_value % 256
             effect_column.number_value = value * 256 + yy
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 35 end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 35
+        end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     effect_number_yy = {
         getter = function(effect_column)
@@ -348,10 +420,18 @@ local COLUMN_PARAMS = {
             local xx = math.floor(effect_column.number_value / 256)
             effect_column.number_value = xx * 256 + value
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 35 end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 35
+        end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     -- Effect columns: amount_value
     -- For xy effects: split into high nibble (x) and low nibble (y)
@@ -374,19 +454,27 @@ local COLUMN_PARAMS = {
                 effect_column.amount_value = value
             end
         end,
-        min_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.number_value)
                 if cmd then
-                    if cmd.is_xy then return cmd.x_max end
+                    if cmd.is_xy then
+                        return cmd.x_max
+                    end
                     return cmd.max
                 end
             end
             return 255
         end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
     effect_amount_y = {
         getter = function(effect_column)
@@ -403,16 +491,24 @@ local COLUMN_PARAMS = {
                 effect_column.amount_value = x * 16 + value
             end
         end,
-        min_value = function(_) return 0 end,
+        min_value = function(_)
+            return 0
+        end,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.number_value)
-                if cmd and cmd.is_xy then return cmd.y_max end
+                if cmd and cmd.is_xy then
+                    return cmd.y_max
+                end
             end
             return 0
         end,
-        absent_value = function(_) return 0 end,
-        default_value = function(_) return 0 end,
+        absent_value = function(_)
+            return 0
+        end,
+        default_value = function(_)
+            return 0
+        end,
     },
 
     automation = {
@@ -450,10 +546,18 @@ local COLUMN_PARAMS = {
             end
             automation:add_point_at(line, normalized_value)
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 127 end,
-        absent_value = function(_) return -1 end,
-        default_value = function(_) return 64 end, -- Middle value
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 127
+        end,
+        absent_value = function(_)
+            return -1
+        end,
+        default_value = function(_)
+            return 64
+        end, -- Middle value
     },
     automation_scaling = {
         getter = function(automation_parameter)
@@ -495,10 +599,18 @@ local COLUMN_PARAMS = {
 
             automation:add_point_at(line, current_point_value, scaling_value)
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 127 end,
-        absent_value = function(_) return -1 end,
-        default_value = function(_) return 64 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 127
+        end,
+        absent_value = function(_)
+            return -1
+        end,
+        default_value = function(_)
+            return 64
+        end,
     },
     automation_prev_scaling = {
         getter = function(automation_parameter)
@@ -529,10 +641,18 @@ local COLUMN_PARAMS = {
             automation:remove_point_at(prev_time)
             automation:add_point_at(prev_time, prev_value, scaling_value)
         end,
-        min_value = function(_) return 0 end,
-        max_value = function(_) return 127 end,
-        absent_value = function(_) return -1 end,
-        default_value = function(_) return 64 end,
+        min_value = function(_)
+            return 0
+        end,
+        max_value = function(_)
+            return 127
+        end,
+        absent_value = function(_)
+            return -1
+        end,
+        default_value = function(_)
+            return 64
+        end,
     }
 }
 
@@ -1040,8 +1160,8 @@ end
 -- Function to modify column value for a specific column
 local function modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
     -- Handle cursor type: move the selected line position
+    local song = renoise.song()
     if column_type == "cursor" then
-        local song = renoise.song()
         local current_line = song.selected_line_index
         local num_lines = song.selected_pattern.number_of_lines
         local new_line = current_line
@@ -1067,6 +1187,10 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
         return
     end
 
+    if not song.transport.edit_mode then
+        return
+    end
+
     local current_value, column, value_quantum = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
 
     local params = COLUMN_PARAMS[column_type]
@@ -1078,15 +1202,20 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
     local min_val = params.min_value(column)
     local new_value = current_value
 
-    if direction > 0 then
-        new_value = current_value + value_quantum
-        if new_value > max_val then
-            new_value = max_val
-        end
-    else
-        new_value = current_value - value_quantum
-        if new_value < min_val then
-            new_value = min_val
+    local real_value = params.getter(column)
+
+
+    if real_value == current_value then
+        if direction > 0 then
+            new_value = current_value + value_quantum
+            if new_value > max_val then
+                new_value = max_val
+            end
+        elseif direction < 0 then
+            new_value = current_value - value_quantum
+            if new_value < min_val then
+                new_value = min_val
+            end
         end
     end
 
