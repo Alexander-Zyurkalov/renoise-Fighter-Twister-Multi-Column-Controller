@@ -49,85 +49,6 @@ local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28
 -- }
 local COLUMN_CONTROLS = {}
 
-
--- Helper functions for automation with specific parameters
-local function get_automation_and_point(automation_parameter)
-    if not automation_parameter then
-        return nil, nil
-    end
-
-    local song = renoise.song()
-    local automation = song.selected_pattern_track:find_automation(automation_parameter)
-    if not automation then
-        return nil, nil
-    end
-
-    local line = song.selected_line_index
-
-    -- Search backwards for the nearest automation point
-    while line >= 1 and not automation:has_point_at(line) do
-        line = line - 1
-    end
-
-    if line < 1 then
-        return automation, nil
-    end
-
-    -- Find the actual point
-    for _, point in ipairs(automation.points) do
-        if point.time == line then
-            return automation, point
-        end
-    end
-
-    return automation, nil
-end
-
-local function get_automation_and_prev_point(automation_parameter)
-    if not automation_parameter then
-        return nil, nil
-    end
-
-    local song = renoise.song()
-    local automation = song.selected_pattern_track:find_automation(automation_parameter)
-    if not automation then
-        return nil, nil
-    end
-
-    local current_line = song.selected_line_index
-    local prev_point = nil
-    local latest_time = 0
-
-    -- Find the most recent automation point before current line
-    for _, point in ipairs(automation.points) do
-        if point.time < current_line and point.time > latest_time then
-            prev_point = point
-            latest_time = point.time
-        end
-    end
-
-    return automation, prev_point
-end
-
-local function create_or_get_automation(automation_parameter)
-    if not automation_parameter then
-        return nil
-    end
-
-    local song = renoise.song()
-    local automation = song.selected_pattern_track:find_automation(automation_parameter)
-
-    if not automation then
-        if automation_parameter.is_automatable then
-            automation = song.selected_pattern_track:create_automation(automation_parameter)
-        else
-            return nil
-        end
-    end
-
-    return automation
-end
-
 local function search_backwards(song, is_effect_column, current_line_index, column_index, params)
     local track_index = song.selected_track_index
     local pattern_sequence = song.sequencer.pattern_sequence
@@ -160,29 +81,24 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
 end
 
 -- Column parameter modules
-local SimpleColumnParam       = require("simple_column_param")
-local NumberByteParam         = require("number_byte_param")
-local AmountNibbleParam       = require("amount_nibble_param")
-local AutomationValueParam    = require("automation_value_param")
-local AutomationScalingParam  = require("automation_scaling_param")
+local SimpleColumnParam = require("simple_column_param")
+local NumberByteParam = require("number_byte_param")
+local AmountNibbleParam = require("amount_nibble_param")
+local AutomationValueParam = require("automation_value_param")
+local AutomationScalingParam = require("automation_scaling_param")
 local AutomationPrevScalingParam = require("automation_prev_scaling_param")
+local AutomationHelpers = require("automation_helpers")
 
--- Shared helpers for automation constructors
-local automation_helpers = {
-    get_automation_and_point      = get_automation_and_point,
-    get_automation_and_prev_point = get_automation_and_prev_point,
-    create_or_get_automation      = create_or_get_automation,
-}
 
 -- Column parameter configuration hash-map
 -- Each value is an instance returned by a module's .new() constructor.
 -- All instances expose: getter(col), setter(col, value, index),
 --   min_value(col), max_value(col), is_absent(col), default_value(col)
 local COLUMN_PARAMS = {
-    note   = SimpleColumnParam.new({ property = "note_value",    max = 120,  absent_sentinel = 121,  default = 0 }),
-    volume = SimpleColumnParam.new({ property = "volume_value",  max = 0x80, absent_sentinel = 0xFF, default = 0 }),
-    pan    = SimpleColumnParam.new({ property = "panning_value", max = 0x80, absent_sentinel = 0xFF, default = 0x40 }),
-    delay  = SimpleColumnParam.new({ property = "delay_value",   max = 0xFF, absent_sentinel = 0,    default = 0 }),
+    note = SimpleColumnParam.new({ property = "note_value", max = 120, absent_sentinel = 121, default = 0 }),
+    volume = SimpleColumnParam.new({ property = "volume_value", max = 0x80, absent_sentinel = 0xFF, default = 0 }),
+    pan = SimpleColumnParam.new({ property = "panning_value", max = 0x80, absent_sentinel = 0xFF, default = 0x40 }),
+    delay = SimpleColumnParam.new({ property = "delay_value", max = 0xFF, absent_sentinel = 0, default = 0 }),
 
     -- Note column FX: effect_number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
     fx_number_xx = NumberByteParam.new({ value_property = "effect_number_value", is_high_byte = true }),
@@ -192,14 +108,14 @@ local COLUMN_PARAMS = {
     -- For xy effects: split into high nibble (x) and low nibble (y)
     -- For xx effects: amount_x controls full byte, amount_y is disabled
     fx_amount_x = AmountNibbleParam.new({
-        number_property    = "effect_number_value",
-        amount_property    = "effect_amount_value",
-        is_high_nibble     = true,
+        number_property = "effect_number_value",
+        amount_property = "effect_amount_value",
+        is_high_nibble = true,
     }),
     fx_amount_y = AmountNibbleParam.new({
-        number_property    = "effect_number_value",
-        amount_property    = "effect_amount_value",
-        is_high_nibble     = false,
+        number_property = "effect_number_value",
+        amount_property = "effect_amount_value",
+        is_high_nibble = false,
     }),
 
     -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
@@ -210,19 +126,19 @@ local COLUMN_PARAMS = {
     -- For xy effects: split into high nibble (x) and low nibble (y)
     -- For xx effects: amount_x controls full byte, amount_y is disabled
     effect_amount_x = AmountNibbleParam.new({
-        number_property    = "number_value",
-        amount_property    = "amount_value",
-        is_high_nibble     = true,
+        number_property = "number_value",
+        amount_property = "amount_value",
+        is_high_nibble = true,
     }),
     effect_amount_y = AmountNibbleParam.new({
-        number_property    = "number_value",
-        amount_property    = "amount_value",
-        is_high_nibble     = false,
+        number_property = "number_value",
+        amount_property = "amount_value",
+        is_high_nibble = false,
     }),
 
-    automation = AutomationValueParam.new(automation_helpers),
-    automation_scaling = AutomationScalingParam.new(automation_helpers),
-    automation_prev_scaling = AutomationPrevScalingParam.new(automation_helpers),
+    automation = AutomationValueParam.new(),
+    automation_scaling = AutomationScalingParam.new(),
+    automation_prev_scaling = AutomationPrevScalingParam.new(),
 }
 
 -- Function to send MIDI feedback for a specific CC
@@ -265,7 +181,7 @@ local function get_column_color(column_type, has_value, automation_parameter)
         end
     elseif column_type == "automation_prev_scaling" then
         if automation_parameter and automation_parameter.is_automated then
-            local automation, prev_point = get_automation_and_prev_point(automation_parameter)
+            local _, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
             if prev_point then
                 return AUTOMATION_PREV_SCALING_COLOR
             else
@@ -539,7 +455,7 @@ local function has_value_at_current_position(column_type, column_index, is_effec
         if not automation_parameter then
             return false
         end
-        local automation, prev_point = get_automation_and_prev_point(automation_parameter)
+        local automation, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
         return prev_point ~= nil
     end
 
@@ -771,7 +687,6 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
     local new_value = current_value
 
     local real_value = params:getter(column)
-
 
     if real_value == current_value then
         if direction > 0 then

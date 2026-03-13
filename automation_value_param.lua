@@ -7,15 +7,15 @@
 local AutomationValueParam = {}
 AutomationValueParam.__index = AutomationValueParam
 
-function AutomationValueParam.new(config)
+local AutomationHelpers = require("automation_helpers")
+
+function AutomationValueParam.new()
     local self = setmetatable({}, AutomationValueParam)
-    self.get_automation_and_point = config.get_automation_and_point
-    self.create_or_get_automation = config.create_or_get_automation
     return self
 end
 
 function AutomationValueParam:getter(automation_parameter)
-    local automation, point = self.get_automation_and_point(automation_parameter)
+    local automation, point = AutomationHelpers.get_automation_and_point(automation_parameter)
     if not automation or not point then
         return 0
     end
@@ -33,7 +33,7 @@ function AutomationValueParam:setter(automation_parameter, value, _)
     local normalized_value = value / 127
 
     -- Create or get automation
-    local automation = self.create_or_get_automation(automation_parameter)
+    local automation = AutomationHelpers.create_or_get_automation(automation_parameter)
     if not automation then
         return
     end

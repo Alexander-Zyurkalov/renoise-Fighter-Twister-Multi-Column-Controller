@@ -2,18 +2,18 @@
 --
 -- Config:
 --   get_automation_and_prev_point  (function)  (param) -> automation, prev_point
-
 local AutomationPrevScalingParam = {}
 AutomationPrevScalingParam.__index = AutomationPrevScalingParam
 
-function AutomationPrevScalingParam.new(config)
+local AutomationHelpers = require("automation_helpers")
+
+function AutomationPrevScalingParam.new()
     local self = setmetatable({}, AutomationPrevScalingParam)
-    self.get_prev = config.get_automation_and_prev_point
     return self
 end
 
 function AutomationPrevScalingParam:getter(automation_parameter)
-    local automation, prev_point = self.get_prev(automation_parameter)
+    local automation, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
     if not automation or not prev_point then
         return 64
     end
@@ -28,7 +28,7 @@ function AutomationPrevScalingParam:setter(automation_parameter, value, _)
         return
     end
 
-    local automation, prev_point = self.get_prev(automation_parameter)
+    local automation, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
     if not automation or not prev_point then
         return
     end

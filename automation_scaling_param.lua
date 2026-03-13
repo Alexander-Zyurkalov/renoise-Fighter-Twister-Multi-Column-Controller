@@ -7,15 +7,16 @@
 local AutomationScalingParam = {}
 AutomationScalingParam.__index = AutomationScalingParam
 
-function AutomationScalingParam.new(config)
+local AutomationHelpers = require("automation_helpers")
+
+
+function AutomationScalingParam.new()
     local self = setmetatable({}, AutomationScalingParam)
-    self.get_automation_and_point = config.get_automation_and_point
-    self.create_or_get_automation = config.create_or_get_automation
     return self
 end
 
 function AutomationScalingParam:getter(automation_parameter)
-    local automation, point = self.get_automation_and_point(automation_parameter)
+    local automation, point = AutomationHelpers.get_automation_and_point(automation_parameter)
     if not automation or not point then
         return 0
     end
@@ -30,7 +31,7 @@ function AutomationScalingParam:setter(automation_parameter, value, _)
         return
     end
 
-    local automation = self.create_or_get_automation(automation_parameter)
+    local automation = AutomationHelpers.create_or_get_automation(automation_parameter)
     if not automation then
         return
     end
