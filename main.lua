@@ -20,35 +20,24 @@ local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
 local DEVICE_NAME = "Midi Fighter Twister"
 
 -- Color values for MIDI Fighter Twister
-local NOTE_COLOR = 50        -- Note values (to differentiate note column boundaries)
-local EMPTY_NOTE_COLOR = 40  -- Note values (to differentiate note column boundaries)
-
-local OTHER_PARAM_COLOR = 66 -- Other parameters (volume, pan, delay)
-local EMPTY_COLOR = 64       -- No value/empty
-
-local FX_COLOR = 70                -- Red for note column fx params (number/amount)
-local EMPTY_FX_COLOR = 75          -- Empty red for note column fx params
-local EFFECT_COLOR = 80            -- Slightly different red for effect column params
-local EMPTY_EFFECT_COLOR = 85      -- Empty slightly different red for effect columns
-
-local CURSOR_COLOR = 30      -- Cursor position control
-local AUTOMATION_COLOR = 90  -- Automation control (purple/magenta)
-local AUTOMATION_SCALING_COLOR = 100  -- Automation scaling control (different purple)
-local AUTOMATION_PREV_SCALING_COLOR = 100  -- Previous point scaling control (darker purple)
-local EMPTY_AUTOMATION_COLOR = 110 -- Empty automation
+local COLOR_CONFIG = {
+    NOTE_COLOR = 50,
+    EMPTY_NOTE_COLOR = 40,
+    OTHER_PARAM_COLOR = 66,
+    EMPTY_COLOR = 64,
+    FX_COLOR = 70,
+    EMPTY_FX_COLOR = 75,
+    EFFECT_COLOR = 80,
+    EMPTY_EFFECT_COLOR = 85,
+    CURSOR_COLOR = 30,
+    AUTOMATION_COLOR = 90,
+    AUTOMATION_SCALING_COLOR = 100,
+    AUTOMATION_PREV_SCALING_COLOR = 100,
+    EMPTY_AUTOMATION_COLOR = 110,
+}
 
 -- Available CC numbers pool (modify this list as needed)
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, 44, 45, 46, 47 }
-
--- Dynamic column control mapping (rebuilt when visibility changes)
--- Structure: COLUMN_CONTROLS[cc] = {
---   type = "note/volume/pan/delay/fx_number_xx/fx_number_yy/fx_amount_x/fx_amount_y/effect_number_xx/effect_number_yy/effect_amount_x/effect_amount_y/automation/automation_scaling/automation_prev_scaling",
---   note_column_index = 1..N,
---   effect_column_index = 1..N,
---   automation_parameter = renoise.DeviceParameter (for automation controls)
--- }
-local COLUMN_CONTROLS = {}
-local LAST_CONTROLS = {}
 
 local function search_backwards(song, is_effect_column, current_line_index, column_index, params)
     local track_index = song.selected_track_index
@@ -88,26 +77,17 @@ local AmountNibbleParam = require("amount_nibble_param")
 local AutomationValueParam = require("automation_value_param")
 local AutomationScalingParam = require("automation_scaling_param")
 local AutomationPrevScalingParam = require("automation_prev_scaling_param")
-local AutomationHelpers = require("automation_helpers")
-
 
 -- Column parameter configuration hash-map
--- Each value is an instance returned by a module's .new() constructor.
--- All instances expose: getter(col), setter(col, value, index),
---   min_value(col), max_value(col), is_absent(col), default_value(col)
 local COLUMN_PARAMS = {
     note = SimpleColumnParam.new({ property = "note_value", max = 120, absent_sentinel = 121, default = 0 }),
     volume = SimpleColumnParam.new({ property = "volume_value", max = 0x80, absent_sentinel = 0xFF, default = 0 }),
     pan = SimpleColumnParam.new({ property = "panning_value", max = 0x80, absent_sentinel = 0xFF, default = 0x40 }),
     delay = SimpleColumnParam.new({ property = "delay_value", max = 0xFF, absent_sentinel = 0, default = 0 }),
 
-    -- Note column FX: effect_number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
     fx_number_xx = NumberByteParam.new({ value_property = "effect_number_value", is_high_byte = true }),
     fx_number_yy = NumberByteParam.new({ value_property = "effect_number_value", is_high_byte = false }),
 
-    -- Note column FX: effect_amount_value
-    -- For xy effects: split into high nibble (x) and low nibble (y)
-    -- For xx effects: amount_x controls full byte, amount_y is disabled
     fx_amount_x = AmountNibbleParam.new({
         number_property = "effect_number_value",
         amount_property = "effect_amount_value",
@@ -119,13 +99,9 @@ local COLUMN_PARAMS = {
         is_high_nibble = false,
     }),
 
-    -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
     effect_number_xx = NumberByteParam.new({ value_property = "number_value", is_high_byte = true }),
     effect_number_yy = NumberByteParam.new({ value_property = "number_value", is_high_byte = false }),
 
-    -- Effect columns: amount_value
-    -- For xy effects: split into high nibble (x) and low nibble (y)
-    -- For xx effects: amount_x controls full byte, amount_y is disabled
     effect_amount_x = AmountNibbleParam.new({
         number_property = "number_value",
         amount_property = "amount_value",
@@ -162,611 +138,64 @@ local function send_color_feedback(cc, color_value)
     end
 end
 
--- Function to get the appropriate color for a column type and value state
-local function get_column_color(column_type, has_value, automation_parameter)
-    if column_type == "cursor" then
-        return CURSOR_COLOR
-    end
+-- Create the ColumnControls instance
+local ColumnControls = require("column_controls")
+local column_ctrl = ColumnControls.new({
+    available_ccs = AVAILABLE_CCS,
+    number_of_steps = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+    column_params = COLUMN_PARAMS,
+    color_config = COLOR_CONFIG,
+    send_midi_feedback = send_midi_feedback,
+    send_color_feedback = send_color_feedback,
+    search_backwards = search_backwards,
+})
 
-    if column_type == "automation" then
-        if automation_parameter and automation_parameter.is_automated then
-            return AUTOMATION_COLOR
-        else
-            return EMPTY_AUTOMATION_COLOR
-        end
-    elseif column_type == "automation_scaling" then
-        if automation_parameter and automation_parameter.is_automated then
-            return AUTOMATION_SCALING_COLOR
-        else
-            return EMPTY_AUTOMATION_COLOR
-        end
-    elseif column_type == "automation_prev_scaling" then
-        if automation_parameter and automation_parameter.is_automated then
-            local _, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
-            if prev_point then
-                return AUTOMATION_PREV_SCALING_COLOR
-            else
-                return EMPTY_AUTOMATION_COLOR
-            end
-        else
-            return EMPTY_AUTOMATION_COLOR
-        end
-    end
-
-    -- Note column fx params (red)
-    local is_fx_type = column_type == "fx_number_xx" or column_type == "fx_number_yy"
-            or column_type == "fx_amount_x" or column_type == "fx_amount_y"
-
-    -- Effect column params (slightly different red)
-    local is_effect_type = column_type == "effect_number_xx" or column_type == "effect_number_yy"
-            or column_type == "effect_amount_x" or column_type == "effect_amount_y"
-
-    if not has_value then
-        if column_type == "note" then
-            return EMPTY_NOTE_COLOR
-        elseif is_fx_type then
-            return EMPTY_FX_COLOR
-        elseif is_effect_type then
-            return EMPTY_EFFECT_COLOR
-        else
-            return EMPTY_COLOR
-        end
-    end
-
-    if column_type == "note" then
-        return NOTE_COLOR
-    elseif is_fx_type then
-        return FX_COLOR
-    elseif is_effect_type then
-        return EFFECT_COLOR
-    else
-        return OTHER_PARAM_COLOR
-    end
-end
-
--- Function to rebuild COLUMN_CONTROLS based on current track's visible columns
+-- Wrapper functions for use as notifier callbacks (notifiers cannot receive 'self')
 local function rebuild_column_controls()
-    local song = renoise.song()
-    local track = song.selected_track
-
-    -- Store old mappings before clearing
-    local old_column_controls = {}
-    for cc, control_info in pairs(COLUMN_CONTROLS) do
-        old_column_controls[cc] = control_info
-    end
-
-    -- Build new mappings in temporary table
-    local new_column_controls = {}
-    local new_last_controls = {}
-
-    local cc_index = 1
-    local num_visible_note_columns = track.visible_note_columns
-    local num_visible_effect_columns = track.visible_effect_columns
-
-    -- Assign first CC for cursor position control
-    if cc_index <= table.getn(AVAILABLE_CCS) then
-        local cc = AVAILABLE_CCS[cc_index]
-        new_column_controls[cc] = {
-            type = "cursor",
-            note_column_index = 1
-        }
-        new_last_controls[cc] = {
-            command = 0,
-            channel = 0,
-            control_cc = 0,
-            value = 0,
-            count = 0,
-            number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-        }
-        cc_index = cc_index + 1
-    end
-
-    -- Assign CCs for all visible note columns
-    for note_col_idx = 1, num_visible_note_columns do
-        local column_params = {}
-
-        -- Add optional column types if they're visible
-        if track.volume_column_visible then
-            table.insert(column_params, "volume")
-        end
-
-        if track.panning_column_visible then
-            table.insert(column_params, "pan")
-        end
-
-        if track.delay_column_visible then
-            table.insert(column_params, "delay")
-        end
-
-        if track.sample_effects_column_visible then
-            table.insert(column_params, "fx_number_xx")
-            table.insert(column_params, "fx_number_yy")
-            table.insert(column_params, "fx_amount_x")
-            table.insert(column_params, "fx_amount_y")
-        end
-
-        -- Assign CCs for this note column's parameters
-        for _, param_type in ipairs(column_params) do
-            if cc_index <= table.getn(AVAILABLE_CCS) then
-                local cc = AVAILABLE_CCS[cc_index]
-                new_column_controls[cc] = {
-                    type = param_type,
-                    note_column_index = note_col_idx
-                }
-
-                -- Initialize last control state for this CC
-                new_last_controls[cc] = {
-                    command = 0,
-                    channel = 0,
-                    control_cc = 0,
-                    value = 0,
-                    count = 0,
-                    number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-                }
-
-                cc_index = cc_index + 1
-            else
-                -- Run out of available CCs
-                break
-            end
-        end
-
-        if cc_index > table.getn(AVAILABLE_CCS) then
-            break
-        end
-    end
-
-    -- Assign CCs for all visible effect columns
-    for effect_col_idx = 1, num_visible_effect_columns do
-        local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount_x", "effect_amount_y" }
-
-        -- Assign CCs for this effect column's parameters
-        for _, param_type in ipairs(effect_params) do
-            if cc_index <= table.getn(AVAILABLE_CCS) then
-                local cc = AVAILABLE_CCS[cc_index]
-                new_column_controls[cc] = {
-                    type = param_type,
-                    effect_column_index = effect_col_idx
-                }
-
-                -- Initialize last control state for this CC
-                new_last_controls[cc] = {
-                    command = 0,
-                    channel = 0,
-                    control_cc = 0,
-                    value = 0,
-                    count = 0,
-                    number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-                }
-
-                cc_index = cc_index + 1
-            else
-                -- Run out of available CCs
-                break
-            end
-        end
-
-        if cc_index > table.getn(AVAILABLE_CCS) then
-            break
-        end
-    end
-
-    -- Add automation controls for ALL existing automations
-    local all_automations = AutomationHelpers.get_all_track_automations()
-    for _, automation_param in ipairs(all_automations) do
-        local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
-        for _, param_type in ipairs(automation_params) do
-            if cc_index <= table.getn(AVAILABLE_CCS) then
-                local cc = AVAILABLE_CCS[cc_index]
-                new_column_controls[cc] = {
-                    type = param_type,
-                    automation_parameter = automation_param
-                }
-                new_last_controls[cc] = {
-                    command = 0,
-                    channel = 0,
-                    control_cc = 0,
-                    value = 0,
-                    count = 0,
-                    number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
-                }
-
-                cc_index = cc_index + 1
-            else
-                break
-            end
-        end
-
-        if cc_index > table.getn(AVAILABLE_CCS) then
-            break
-        end
-    end
-
-    -- Find CCs that are being disabled and reset them
-    for old_cc, old_control_info in pairs(old_column_controls) do
-        if new_column_controls[old_cc] == nil then
-            -- This CC is being disabled, reset it
-            send_midi_feedback(old_cc, 0)        -- Reset value to 0
-            send_color_feedback(old_cc, EMPTY_COLOR)  -- Reset color to blue (inactive)
-            local col_info = ""
-            if old_control_info.note_column_index then
-                col_info = " note col" .. old_control_info.note_column_index
-            elseif old_control_info.effect_column_index then
-                col_info = " effect col" .. old_control_info.effect_column_index
-            elseif old_control_info.automation_parameter then
-                col_info = " automation " .. old_control_info.automation_parameter.name
-            end
-            print("  Reset CC" .. old_cc .. " (was " .. old_control_info.type .. col_info .. ")")
-        end
-    end
-
-    -- Apply new mappings
-    COLUMN_CONTROLS = new_column_controls
-    LAST_CONTROLS = new_last_controls
-
-    print("MIDI Fighter Twister: Column controls rebuilt")
-    for cc, control_info in pairs(COLUMN_CONTROLS) do
-        local col_info = ""
-        if control_info.note_column_index then
-            col_info = " (note column " .. control_info.note_column_index .. ")"
-        elseif control_info.effect_column_index then
-            col_info = " (effect column " .. control_info.effect_column_index .. ")"
-        elseif control_info.automation_parameter then
-            local param_name = control_info.automation_parameter.name or "Unknown"
-            col_info = " (" .. param_name .. ")"
-        end
-        print("  CC" .. cc .. " -> " .. control_info.type .. col_info)
-    end
+    column_ctrl:rebuild()
 end
 
--- Function to search backwards for a column value in previous lines
-local function search_backwards_for_value(column_type, column_index, current_line_index, song, is_effect_column)
-    local params = COLUMN_PARAMS[column_type]
-    if not params then
-        return 0
-    end
-    return search_backwards(song, is_effect_column, current_line_index, column_index, params)
-end
-
--- Function to check if a value exists at the current position for a given column type and column index
-local function has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
-    if column_type == "cursor" then
-        return true -- cursor always has a value (the current line)
-    end
-    if column_type == "automation" or column_type == "automation_scaling" then
-        return automation_parameter ~= nil
-    elseif column_type == "automation_prev_scaling" then
-        if not automation_parameter then
-            return false
-        end
-        local automation, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
-        return prev_point ~= nil
-    end
-
-    local song = renoise.song()
-    local current_line = song.selected_line
-
-    if not current_line then
-        return false
-    end
-
-    local columns = nil
-    if is_effect_column then
-        columns = current_line.effect_columns
-    else
-        columns = current_line.note_columns
-    end
-
-    if column_index > 0 and column_index <= table.getn(columns) then
-        local column = columns[column_index]
-        local params = COLUMN_PARAMS[column_type]
-
-        if params then
-            return not params:is_absent(column)
-        end
-    end
-
-    return false
-end
-
--- Function to get current column value for a specific column
-local function get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
-    if column_type == "cursor" then
-        local song = renoise.song()
-        return song.selected_line_index, nil, 1
-    end
-    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
-        local params = COLUMN_PARAMS[column_type]
-        local value_quantum = automation_parameter.value_quantum / (automation_parameter.value_max - automation_parameter.value_min) + automation_parameter.value_min
-        local return_value_quantum = math.ceil(value_quantum * 127)
-        if return_value_quantum == 0 then
-            return_value_quantum = 1
-        end
-        return params:getter(automation_parameter), automation_parameter, return_value_quantum
-    end
-
-    local song = renoise.song()
-    local current_line = song.selected_line
-
-    if not current_line then
-        return 0, nil
-    end
-
-    local columns = nil
-    if is_effect_column then
-        columns = current_line.effect_columns
-    else
-        columns = current_line.note_columns
-    end
-
-    if column_index > 0 and column_index <= table.getn(columns) then
-        local column = columns[column_index]
-        local params = COLUMN_PARAMS[column_type]
-
-        if not params then
-            return 0, nil
-        end
-
-        local column_value = params:getter(column)
-
-        -- Handle empty values by looking back through previous lines
-        if params:is_absent(column) then
-            column_value = search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
-        end
-
-        return column_value, column, 1
-    end
-
-    return 0, nil
-end
-
--- Function to set selection for a specific column
-local function set_selection(column_type, column_index, is_effect_column, automation_parameter)
-    if column_type == "cursor" then
-        return -- cursor only moves line position, no column selection needed
-    end
-    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
-        -- Switch to automation view if not already there
-        if renoise.app().window.active_lower_frame ~= renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION then
-            renoise.app().window.active_lower_frame = renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION
-        end
-        -- Set the selected automation parameter
-        if automation_parameter then
-            renoise.song().selected_automation_parameter = automation_parameter
-        end
-        return
-    end
-
-    local song = renoise.song()
-    local current_line = song.selected_line
-
-    if not current_line then
-        return
-    end
-    if (not is_effect_column) then
-        song.selected_note_column_index = column_index
-    else
-        song.selected_effect_column_index = column_index
-    end
-    local select_column = column_index
-    if is_effect_column then
-        select_column = song.selected_track.visible_note_columns + column_index
-    end
-
-    song.selection_in_pattern = {
-        start_line = song.selected_line_index,
-        end_line = song.selected_line_index,
-        start_track = song.selected_track_index,
-        end_track = song.selected_track_index,
-        start_column = select_column,
-        end_column = select_column,
-    }
-end
-
--- Function to map column value to MIDI range (0-127)
--- column parameter is needed for lambda fields; may be nil for cursor/automation types
-local function map_to_midi_range(column_type, current_value, automation_parameter, column)
-    if column_type == "cursor" then
-        -- Map line position to 0-127 range based on pattern length
-        local song = renoise.song()
-        local num_lines = song.selected_pattern.number_of_lines
-        if num_lines <= 1 then
-            return 0
-        end
-        local normalized = (current_value - 1) / (num_lines - 1)
-        return math.max(0, math.min(127, math.floor(normalized * 127 + 0.5)))
-    end
-
-    local params = COLUMN_PARAMS[column_type]
-    if not params then
-        return 0
-    end
-
-    if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
-        return current_value -- Already in 0-127 range
-    end
-
-    local max_val = params:max_value(column)
-    local min_val = params:min_value(column)
-    local range = max_val - min_val
-    if range <= 0 then
-        return 0
-    end
-
-    -- Map the value from column range to MIDI range (0-127)
-    local normalized_value = (current_value - min_val) / range
-    local midi_value = math.floor(normalized_value * 127 + 0.5) -- Round to nearest integer
-
-    -- Clamp to MIDI range
-    return math.max(0, math.min(127, midi_value))
-end
-
--- Function to update MIDI controller for a specific column type and column index
-local function update_controller_for_column(column_type, column_index, cc, is_effect_column, automation_parameter)
-    local current_value, column = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
-    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
-    local color_value = get_column_color(column_type, has_value, automation_parameter)
-
-    -- Map column value to MIDI range (0-127)
-    local midi_value = map_to_midi_range(column_type, current_value, automation_parameter, column)
-
-    -- Send both mapped column value and color
-    send_midi_feedback(cc, midi_value)
-    send_color_feedback(cc, color_value)
-end
-
--- Function to update all controllers
 local function update_all_controllers()
-    for cc, control_info in pairs(COLUMN_CONTROLS) do
-        local is_effect_column = (control_info.effect_column_index ~= nil)
-        local column_index = control_info.note_column_index or control_info.effect_column_index or 0
-        local automation_parameter = control_info.automation_parameter
-        update_controller_for_column(control_info.type, column_index, cc, is_effect_column, automation_parameter)
-    end
-end
-
--- Function to modify column value for a specific column
-local function modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
-    -- Handle cursor type: move the selected line position
-    local song = renoise.song()
-    if column_type == "cursor" then
-        local current_line = song.selected_line_index
-        local num_lines = song.selected_pattern.number_of_lines
-        local new_line = current_line
-
-        if direction > 0 then
-            new_line = current_line + 1
-            if new_line > num_lines then
-                new_line = num_lines
-            end
-        else
-            new_line = current_line - 1
-            if new_line < 1 then
-                new_line = 1
-            end
-        end
-
-        song.selected_line_index = new_line
-
-        -- Send feedback
-        local midi_value = map_to_midi_range("cursor", new_line, nil, nil)
-        send_midi_feedback(cc, midi_value)
-        send_color_feedback(cc, CURSOR_COLOR)
-        return
-    end
-
-    if not song.transport.edit_mode then
-        return
-    end
-
-    local current_value, column, value_quantum = get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
-
-    local params = COLUMN_PARAMS[column_type]
-    if not params then
-        return
-    end
-
-    local max_val = params:max_value(column)
-    local min_val = params:min_value(column)
-    local new_value = current_value
-
-    local real_value = params:getter(column)
-
-    if real_value == current_value then
-        if direction > 0 then
-            new_value = current_value + value_quantum
-            if new_value > max_val then
-                new_value = max_val
-            end
-        elseif direction < 0 then
-            new_value = current_value - value_quantum
-            if new_value < min_val then
-                new_value = min_val
-            end
-        end
-    end
-
-    params:setter(column, new_value, column_index)
-    set_selection(column_type, column_index, is_effect_column, automation_parameter)
-
-    -- Send feedback with mapped MIDI value
-    local midi_value = map_to_midi_range(column_type, new_value, automation_parameter, column)
-    send_midi_feedback(cc, midi_value)
-    local has_value = has_value_at_current_position(column_type, column_index, is_effect_column, automation_parameter)
-    local color_value = get_column_color(column_type, has_value, automation_parameter)
-    send_color_feedback(cc, color_value)
-end
-
--- Function to check if ready to modify for a specific CC
-local function is_ready_to_modify(command, channel, control_cc)
-    local last_control = LAST_CONTROLS[control_cc]
-    if not last_control then
-        return false
-    end
-
-    -- Check if this is the same message as before
-    local is_same_message = (last_control.command == command and
-            last_control.channel == channel and
-            last_control.control_cc == control_cc)
-
-    if is_same_message then
-        -- Increment counter for consecutive identical messages
-        last_control.count = last_control.count + 1
-        -- Reset counter if it exceeds the threshold
-        if last_control.count > last_control.number_of_steps_to_change_value then
-            last_control.count = 1
-        end
-    else
-        -- Store new message state and reset counter
-        last_control.command = command
-        last_control.channel = channel
-        last_control.control_cc = control_cc
-        last_control.count = 1
-    end
-
-    -- Check if we should modify: correct CC message on correct channel with enough repetitions
-    return (channel == CONTROL_CHANNEL and
-            COLUMN_CONTROLS[control_cc] ~= nil and
-            last_control.count >= last_control.number_of_steps_to_change_value)
+    column_ctrl:update_all()
 end
 
 -- MIDI event handler
 local function midi_callback(message)
     local status = message[1]
-    local control_cc = message[2] or 0  -- CC number
-    local value_cc = message[3] or 0  -- CC value
+    local control_cc = message[2] or 0
+    local value_cc = message[3] or 0
 
     local channel = (status % 16) + 1
     local command = status - (status % 16)
 
     if command == 176 and value_cc == 127 or value_cc == 0 then
         if value_cc == 127 then
-            if LAST_CONTROLS[control_cc] then
-                LAST_CONTROLS[control_cc].number_of_steps_to_change_value = 1
+            if column_ctrl.last_controls[control_cc] then
+                column_ctrl.last_controls[control_cc].number_of_steps_to_change_value = 1
             end
         elseif value_cc == 0 then
-            local control_info = COLUMN_CONTROLS[control_cc]
+            local control_info = column_ctrl.controls[control_cc]
             if control_info then
                 local is_effect_column = (control_info.effect_column_index ~= nil)
                 local column_index = control_info.note_column_index or control_info.effect_column_index or 0
                 local automation_parameter = control_info.automation_parameter
-                set_selection(control_info.type, column_index, is_effect_column, automation_parameter)
-                if LAST_CONTROLS[control_cc] then
-                    LAST_CONTROLS[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
+                column_ctrl:set_selection(control_info.type, column_index, is_effect_column, automation_parameter)
+                if column_ctrl.last_controls[control_cc] then
+                    column_ctrl.last_controls[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
                 end
             end
         end
-    elseif command == 176 and is_ready_to_modify(command, channel, control_cc) then
-        local control_info = COLUMN_CONTROLS[control_cc]
+    elseif command == 176 and column_ctrl:is_ready_to_modify(command, channel, control_cc, CONTROL_CHANNEL) then
+        local control_info = column_ctrl.controls[control_cc]
         if control_info then
             local is_effect_column = (control_info.effect_column_index ~= nil)
             local column_index = control_info.note_column_index or control_info.effect_column_index or 0
             local automation_parameter = control_info.automation_parameter
 
             if value_cc == INCREASE_VALUE then
-                modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column, automation_parameter)
+                column_ctrl:modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column, automation_parameter)
             elseif value_cc == DECREASE_VALUE then
-                modify_column_value(control_info.type, column_index, control_cc, -1, is_effect_column, automation_parameter)
+                column_ctrl:modify_column_value(control_info.type, column_index, control_cc, -1, is_effect_column, automation_parameter)
             end
         end
     end
@@ -799,7 +228,6 @@ local function attach_automation_observers()
     local song = renoise.song()
     local pattern_track = song.selected_pattern_track
 
-    -- Add observer for automation list changes
     if pattern_track and pattern_track.automation_observable then
         if pattern_track.automation_observable:has_notifier(rebuild_column_controls) == false then
             pattern_track.automation_observable:add_notifier(rebuild_column_controls)
@@ -818,7 +246,6 @@ local function detach_automation_observers()
     local song = renoise.song()
     local pattern_track = song.selected_pattern_track
 
-    -- Remove automation observers
     if pattern_track and pattern_track.automation_observable then
         if pattern_track.automation_observable:has_notifier(rebuild_column_controls) then
             pattern_track.automation_observable:remove_notifier(rebuild_column_controls)
@@ -837,7 +264,6 @@ local function attach_column_observers()
     local song = renoise.song()
     local track = song.selected_track
 
-    -- Attach observers for column visibility changes
     if track.volume_column_visible_observable:has_notifier(rebuild_column_controls) == false then
         track.volume_column_visible_observable:add_notifier(rebuild_column_controls)
     end
@@ -858,7 +284,6 @@ local function attach_column_observers()
         track.visible_note_columns_observable:add_notifier(rebuild_column_controls)
     end
 
-    -- Add observer for effect columns visibility
     if track.visible_effect_columns_observable:has_notifier(rebuild_column_controls) == false then
         track.visible_effect_columns_observable:add_notifier(rebuild_column_controls)
     end
@@ -875,7 +300,6 @@ local function detach_column_observers()
     local song = renoise.song()
     local track = song.selected_track
 
-    -- Remove column visibility observers
     if track.volume_column_visible_observable:has_notifier(rebuild_column_controls) then
         track.volume_column_visible_observable:remove_notifier(rebuild_column_controls)
     end
@@ -896,7 +320,6 @@ local function detach_column_observers()
         track.visible_note_columns_observable:remove_notifier(rebuild_column_controls)
     end
 
-    -- Remove effect columns observer
     if track.visible_effect_columns_observable:has_notifier(rebuild_column_controls) then
         track.visible_effect_columns_observable:remove_notifier(rebuild_column_controls)
     end
@@ -922,17 +345,14 @@ local function attach_observers()
 
     local song = renoise.song()
 
-    -- Track selection changed
     if song.selected_track_index_observable:has_notifier(on_track_changed) == false then
         song.selected_track_index_observable:add_notifier(on_track_changed)
     end
 
-    -- Pattern selection changed
     if song.selected_pattern_index_observable:has_notifier(update_all_controllers) == false then
         song.selected_pattern_index_observable:add_notifier(update_all_controllers)
     end
 
-    -- Start position timer (handles line position changes)
     start_position_timer()
 
     observers_attached = true
@@ -946,7 +366,6 @@ local function detach_observers()
 
     local song = renoise.song()
 
-    -- Remove observers
     if song.selected_track_index_observable:has_notifier(on_track_changed) then
         song.selected_track_index_observable:remove_notifier(on_track_changed)
     end
@@ -955,11 +374,9 @@ local function detach_observers()
         song.selected_pattern_index_observable:remove_notifier(update_all_controllers)
     end
 
-    -- Detach column and automation observers
     detach_column_observers()
     detach_automation_observers()
 
-    -- Stop position timer
     stop_position_timer()
 
     observers_attached = false
@@ -967,7 +384,6 @@ end
 
 -- Function to initialize MIDI devices
 local function initialize()
-    -- Close existing devices
     if midi_device then
         midi_device:close()
         midi_device = nil
@@ -977,14 +393,11 @@ local function initialize()
         midi_output_device = nil
     end
 
-    -- Detach old observers
     detach_observers()
 
-    -- Find and open MIDI Fighter Twister
     local available_input_devices = renoise.Midi.available_input_devices()
     local available_output_devices = renoise.Midi.available_output_devices()
 
-    -- Open input device
     for i = 1, table.getn(available_input_devices) do
         if available_input_devices[i] == DEVICE_NAME then
             midi_device = renoise.Midi.create_input_device(DEVICE_NAME, midi_callback)
@@ -992,7 +405,6 @@ local function initialize()
         end
     end
 
-    -- Open output device
     for i = 1, table.getn(available_output_devices) do
         if available_output_devices[i] == DEVICE_NAME then
             midi_output_device = renoise.Midi.create_output_device(DEVICE_NAME)
@@ -1000,13 +412,12 @@ local function initialize()
         end
     end
 
-    -- Setup column controls and observers
     if midi_output_device then
         rebuild_column_controls()
         attach_observers()
         attach_column_observers()
         attach_automation_observers()
-        update_all_controllers() -- Send current values and colors for all columns
+        update_all_controllers()
     end
 end
 
