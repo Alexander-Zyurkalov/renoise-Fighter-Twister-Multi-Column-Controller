@@ -184,412 +184,74 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
     return params.default_value(nil)
 end
 
--- Helper: create a constant lambda from a value
-local function constant(v)
-    return function(_) return v end
-end
+-- Column parameter modules
+local SimpleColumnParam       = require("simple_column_param")
+local NumberByteParam         = require("number_byte_param")
+local AmountNibbleParam       = require("amount_nibble_param")
+local AutomationValueParam    = require("automation_value_param")
+local AutomationScalingParam  = require("automation_scaling_param")
+local AutomationPrevScalingParam = require("automation_prev_scaling_param")
 
--- Common constant lambdas (shared across COLUMN_PARAMS to avoid duplication)
-local ALWAYS_ZERO = constant(0)
-local ALWAYS_0xFF = constant(0xFF)
-local ALWAYS_0x80 = constant(0x80)
-local ALWAYS_0x40 = constant(0x40)
-local ALWAYS_35 = constant(35)
-local ALWAYS_127 = constant(127)
-local ALWAYS_64 = constant(64)
-
--- Common is_absent lambdas
-
--- fx_amount is absent only when the corresponding fx_number (effect_number_value) is absent
-local function is_absent_fx_amount(col)
-    return col.effect_number_value == 0
-end
-
--- effect_amount is absent only when the corresponding effect_number (number_value) is absent
-local function is_absent_effect_amount(col)
-    return col.number_value == 0
-end
-
--- automation types are never "absent" in the column sense (checked separately via automation_parameter)
-local function is_absent_never(_)
-    return false
-end
+-- Shared helpers for automation constructors
+local automation_helpers = {
+    get_automation_and_point      = get_automation_and_point,
+    get_automation_and_prev_point = get_automation_and_prev_point,
+    create_or_get_automation      = create_or_get_automation,
+}
 
 -- Column parameter configuration hash-map
--- All value fields (min_value, max_value, default_value) are lambdas: function(column) -> number
--- is_absent: function(column) -> boolean, checks whether the column value should be treated as empty
--- The column argument may be nil in some contexts (e.g. default_value at end of search_backwards)
+-- Each value is an instance returned by a module's .new() constructor.
+-- All instances expose: getter(col), setter(col, value, index),
+--   min_value(col), max_value(col), is_absent(col), default_value(col)
 local COLUMN_PARAMS = {
-    note = {
-        getter = function(note_column)
-            return note_column.note_value
-        end,
-        setter = function(note_column, value, note_column_index)
-            note_column.note_value = value
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = constant(120),
-        is_absent = function(col)
-            return col.note_value == 121
-        end,
-        default_value = ALWAYS_ZERO,
-    },
-    volume = {
-        getter = function(note_column)
-            return note_column.volume_value
-        end,
-        setter = function(note_column, value, note_column_index)
-            note_column.volume_value = value
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_0x80,
-        is_absent = function(col)
-            return col.volume_value == 0xFF
-        end,
-        default_value = ALWAYS_ZERO,
-    },
-    pan = {
-        getter = function(note_column)
-            return note_column.panning_value
-        end,
-        setter = function(note_column, value, note_column_index)
-            note_column.panning_value = value
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_0x80,
-        is_absent = function(col)
-            return col.panning_value == 0xFF
-        end,
-        default_value = ALWAYS_0x40, -- Center pan
-    },
-    delay = {
-        getter = function(note_column)
-            return note_column.delay_value
-        end,
-        setter = function(note_column, value, note_column_index)
-            note_column.delay_value = value
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_0xFF,
-        is_absent = function(col)
-            return col.delay_value == 0
-        end,
-        default_value = ALWAYS_ZERO,
-    },
+    note   = SimpleColumnParam.new({ property = "note_value",    max = 120,  absent_sentinel = 121,  default = 0 }),
+    volume = SimpleColumnParam.new({ property = "volume_value",  max = 0x80, absent_sentinel = 0xFF, default = 0 }),
+    pan    = SimpleColumnParam.new({ property = "panning_value", max = 0x80, absent_sentinel = 0xFF, default = 0x40 }),
+    delay  = SimpleColumnParam.new({ property = "delay_value",   max = 0xFF, absent_sentinel = 0,    default = 0 }),
 
     -- Note column FX: effect_number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
-    fx_number_xx = {
-        getter = function(note_column)
-            return math.floor(note_column.effect_number_value / 256)
-        end,
-        setter = function(note_column, value, note_column_index)
-            local yy = note_column.effect_number_value % 256
-            note_column.effect_number_value = value * 256 + yy
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_35,
-        is_absent = function(col)
-            return math.floor(col.effect_number_value / 256) == 0
-        end,
-        default_value = ALWAYS_ZERO,
-    },
-    fx_number_yy = {
-        getter = function(note_column)
-            return note_column.effect_number_value % 256
-        end,
-        setter = function(note_column, value, note_column_index)
-            local xx = math.floor(note_column.effect_number_value / 256)
-            note_column.effect_number_value = xx * 256 + value
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_35,
-        is_absent = function(col)
-            return col.effect_number_value % 256 == 0
-        end,
-        default_value = ALWAYS_ZERO,
-    },
+    fx_number_xx = NumberByteParam.new({ value_property = "effect_number_value", is_high_byte = true }),
+    fx_number_yy = NumberByteParam.new({ value_property = "effect_number_value", is_high_byte = false }),
+
     -- Note column FX: effect_amount_value
     -- For xy effects: split into high nibble (x) and low nibble (y)
     -- For xx effects: amount_x controls full byte, amount_y is disabled
-    fx_amount_x = {
-        getter = function(note_column)
-            local cmd = get_effect_command(note_column.effect_number_value)
-            if cmd and cmd.is_xy then
-                return math.floor(note_column.effect_amount_value / 16)
-            else
-                return note_column.effect_amount_value
-            end
-        end,
-        setter = function(note_column, value, note_column_index)
-            local cmd = get_effect_command(note_column.effect_number_value)
-            if cmd and cmd.is_xy then
-                local y = note_column.effect_amount_value % 16
-                note_column.effect_amount_value = value * 16 + y
-            else
-                note_column.effect_amount_value = value
-            end
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = function(column)
-            if column then
-                local cmd = get_effect_command(column.effect_number_value)
-                if cmd then
-                    if cmd.is_xy then
-                        return cmd.x_max
-                    end
-                    return cmd.max
-                end
-            end
-            return 255
-        end,
-        is_absent = is_absent_fx_amount,
-        default_value = ALWAYS_ZERO,
-    },
-    fx_amount_y = {
-        getter = function(note_column)
-            local cmd = get_effect_command(note_column.effect_number_value)
-            if cmd and cmd.is_xy then
-                return note_column.effect_amount_value % 16
-            end
-            return 0
-        end,
-        setter = function(note_column, value, note_column_index)
-            local cmd = get_effect_command(note_column.effect_number_value)
-            if cmd and cmd.is_xy then
-                local x = math.floor(note_column.effect_amount_value / 16)
-                note_column.effect_amount_value = x * 16 + value
-            end
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = function(column)
-            if column then
-                local cmd = get_effect_command(column.effect_number_value)
-                if cmd and cmd.is_xy then
-                    return cmd.y_max
-                end
-            end
-            return 0
-        end,
-        is_absent = is_absent_fx_amount,
-        default_value = ALWAYS_ZERO,
-    },
+    fx_amount_x = AmountNibbleParam.new({
+        number_property    = "effect_number_value",
+        amount_property    = "effect_amount_value",
+        is_high_nibble     = true,
+        get_effect_command = get_effect_command,
+    }),
+    fx_amount_y = AmountNibbleParam.new({
+        number_property    = "effect_number_value",
+        amount_property    = "effect_amount_value",
+        is_high_nibble     = false,
+        get_effect_command = get_effect_command,
+    }),
 
     -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
-    effect_number_xx = {
-        getter = function(effect_column)
-            return math.floor(effect_column.number_value / 256)
-        end,
-        setter = function(effect_column, value, effect_column_index)
-            local yy = effect_column.number_value % 256
-            effect_column.number_value = value * 256 + yy
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_35,
-        is_absent = function(col)
-            return math.floor(col.number_value / 256) == 0
-        end,
-        default_value = ALWAYS_ZERO,
-    },
-    effect_number_yy = {
-        getter = function(effect_column)
-            return effect_column.number_value % 256
-        end,
-        setter = function(effect_column, value, effect_column_index)
-            local xx = math.floor(effect_column.number_value / 256)
-            effect_column.number_value = xx * 256 + value
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_35,
-        is_absent = function(col)
-            return col.number_value % 256 == 0
-        end,
-        default_value = ALWAYS_ZERO,
-    },
+    effect_number_xx = NumberByteParam.new({ value_property = "number_value", is_high_byte = true }),
+    effect_number_yy = NumberByteParam.new({ value_property = "number_value", is_high_byte = false }),
+
     -- Effect columns: amount_value
     -- For xy effects: split into high nibble (x) and low nibble (y)
     -- For xx effects: amount_x controls full byte, amount_y is disabled
-    effect_amount_x = {
-        getter = function(effect_column)
-            local cmd = get_effect_command(effect_column.number_value)
-            if cmd and cmd.is_xy then
-                return math.floor(effect_column.amount_value / 16)
-            else
-                return effect_column.amount_value
-            end
-        end,
-        setter = function(effect_column, value, effect_column_index)
-            local cmd = get_effect_command(effect_column.number_value)
-            if cmd and cmd.is_xy then
-                local y = effect_column.amount_value % 16
-                effect_column.amount_value = value * 16 + y
-            else
-                effect_column.amount_value = value
-            end
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = function(column)
-            if column then
-                local cmd = get_effect_command(column.number_value)
-                if cmd then
-                    if cmd.is_xy then
-                        return cmd.x_max
-                    end
-                    return cmd.max
-                end
-            end
-            return 255
-        end,
-        is_absent = is_absent_effect_amount,
-        default_value = ALWAYS_ZERO,
-    },
-    effect_amount_y = {
-        getter = function(effect_column)
-            local cmd = get_effect_command(effect_column.number_value)
-            if cmd and cmd.is_xy then
-                return effect_column.amount_value % 16
-            end
-            return 0
-        end,
-        setter = function(effect_column, value, effect_column_index)
-            local cmd = get_effect_command(effect_column.number_value)
-            if cmd and cmd.is_xy then
-                local x = math.floor(effect_column.amount_value / 16)
-                effect_column.amount_value = x * 16 + value
-            end
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = function(column)
-            if column then
-                local cmd = get_effect_command(column.number_value)
-                if cmd and cmd.is_xy then
-                    return cmd.y_max
-                end
-            end
-            return 0
-        end,
-        is_absent = is_absent_effect_amount,
-        default_value = ALWAYS_ZERO,
-    },
+    effect_amount_x = AmountNibbleParam.new({
+        number_property    = "number_value",
+        amount_property    = "amount_value",
+        is_high_nibble     = true,
+        get_effect_command = get_effect_command,
+    }),
+    effect_amount_y = AmountNibbleParam.new({
+        number_property    = "number_value",
+        amount_property    = "amount_value",
+        is_high_nibble     = false,
+        get_effect_command = get_effect_command,
+    }),
 
-    automation = {
-        getter = function(automation_parameter)
-            local automation, point = get_automation_and_point(automation_parameter)
-            if not automation or not point then
-                return 0
-            end
-
-            local value = point.value
-            local normalized_value = value
-            local return_value = math.floor(normalized_value * 127 + 0.5)
-            return return_value -- Scale to 0-127 range
-        end,
-        setter = function(automation_parameter, value, _)
-            if not automation_parameter then
-                return
-            end
-
-            -- Convert 0-127 value back to parameter range
-            local normalized_value = value / 127
-            local param_value = automation_parameter.value_min + (normalized_value * (automation_parameter.value_max - automation_parameter.value_min))
-
-            -- Create or get automation
-            local automation = create_or_get_automation(automation_parameter)
-            if not automation then
-                return
-            end
-
-            -- Add automation point at current line
-            local song = renoise.song()
-            local line = song.selected_line_index
-            if automation:has_point_at(line) then
-                automation:remove_point_at(line)
-            end
-            automation:add_point_at(line, normalized_value)
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_127,
-        is_absent = is_absent_never,
-        default_value = ALWAYS_64, -- Middle value
-    },
-    automation_scaling = {
-        getter = function(automation_parameter)
-            local automation, point = get_automation_and_point(automation_parameter)
-            if not automation or not point then
-                return 0
-            end
-
-            local scaling = point.scaling
-            local normalized_scaling = (scaling + 1.0) / 2.0
-            return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
-        end,
-        setter = function(automation_parameter, value, _)
-            if not automation_parameter then
-                return
-            end
-
-            local automation = create_or_get_automation(automation_parameter)
-            if not automation then
-                return
-            end
-
-            local song = renoise.song()
-            local line = song.selected_line_index
-
-            local normalized_value = value / 127
-            local scaling_value = (normalized_value * 2.0) - 1.0
-
-            local current_point_value = 0.5
-            if automation:has_point_at(line) then
-                for _, point in ipairs(automation.points) do
-                    if point.time == line then
-                        current_point_value = point.value
-                        break
-                    end
-                end
-                automation:remove_point_at(line)
-            end
-
-            automation:add_point_at(line, current_point_value, scaling_value)
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_127,
-        is_absent = is_absent_never,
-        default_value = ALWAYS_64,
-    },
-    automation_prev_scaling = {
-        getter = function(automation_parameter)
-            local automation, prev_point = get_automation_and_prev_point(automation_parameter)
-            if not automation or not prev_point then
-                return 64
-            end
-
-            local scaling = prev_point.scaling
-            local normalized_scaling = (scaling + 1.0) / 2.0
-            return math.floor(math.max(0, math.min(1, normalized_scaling)) * 127 + 0.5)
-        end,
-        setter = function(automation_parameter, value, _)
-            if not automation_parameter then
-                return
-            end
-
-            local automation, prev_point = get_automation_and_prev_point(automation_parameter)
-            if not automation or not prev_point then
-                return
-            end
-
-            local normalized_value = value / 127
-            local scaling_value = (normalized_value * 2.0) - 1.0
-
-            local prev_time = prev_point.time
-            local prev_value = prev_point.value
-            automation:remove_point_at(prev_time)
-            automation:add_point_at(prev_time, prev_value, scaling_value)
-        end,
-        min_value = ALWAYS_ZERO,
-        max_value = ALWAYS_127,
-        is_absent = is_absent_never,
-        default_value = ALWAYS_64,
-    }
+    automation = AutomationValueParam.new(automation_helpers),
+    automation_scaling = AutomationScalingParam.new(automation_helpers),
+    automation_prev_scaling = AutomationPrevScalingParam.new(automation_helpers),
 }
 
 -- Function to send MIDI feedback for a specific CC
