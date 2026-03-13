@@ -3,21 +3,14 @@
 -- Dynamically assigns CCs to control ALL visible note columns, effect columns, and all existing automations
 -- Sends color feedback: Green if value exists, Blue if empty, Red for fx/effects, Purple for automation
 
--- Global variables
-local midi_device = nil
-local midi_output_device = nil
+-- Observer state
 local observers_attached = false
 local column_observers_attached = false
 local automation_observers_attached = false
 local position_timer = nil
 
--- MIDI control settings
-local CONTROL_CHANNEL = 1
-local COLOUR_CHANNEL = 2
-local INCREASE_VALUE = 65
-local DECREASE_VALUE = 63
+-- Configuration constants
 local NUMBER_OF_STEPS_TO_CHANGE_VALUE = 6
-local DEVICE_NAME = "Midi Fighter Twister"
 
 -- Color values for MIDI Fighter Twister
 local COLOR_CONFIG = {
@@ -118,37 +111,31 @@ local COLUMN_PARAMS = {
     automation_prev_scaling = AutomationPrevScalingParam.new(),
 }
 
--- Function to send MIDI feedback for a specific CC
-local function send_midi_feedback(cc, value)
-    if midi_output_device then
-        local status_byte = 176 + (CONTROL_CHANNEL - 1)
-        local clamped_value = math.min(127, value)
-        local message = { status_byte, cc, clamped_value }
-        midi_output_device:send(message)
-    end
-end
+-- Create MIDI controller
+local MidiController = require("midi_controller")
+local midi_ctrl = MidiController.new({
+    device_name = "Midi Fighter Twister",
+    control_channel = 1,
+    colour_channel = 2,
+    increase_value = 65,
+    decrease_value = 63,
+    number_of_steps = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+})
 
--- Function to send color feedback for a specific CC
-local function send_color_feedback(cc, color_value)
-    if midi_output_device then
-        local status_byte = 176 + (COLOUR_CHANNEL - 1)
-        local clamped_value = math.min(127, color_value)
-        local message = { status_byte, cc, clamped_value }
-        midi_output_device:send(message)
-    end
-end
-
--- Create the ColumnControls instance
+-- Create column controls, wired to MIDI controller for feedback
 local ColumnControls = require("column_controls")
 local column_ctrl = ColumnControls.new({
     available_ccs = AVAILABLE_CCS,
     number_of_steps = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
     column_params = COLUMN_PARAMS,
     color_config = COLOR_CONFIG,
-    send_midi_feedback = send_midi_feedback,
-    send_color_feedback = send_color_feedback,
+    send_midi_feedback = function(cc, value) midi_ctrl:send_feedback(cc, value) end,
+    send_color_feedback = function(cc, color) midi_ctrl:send_color(cc, color) end,
     search_backwards = search_backwards,
 })
+
+-- Connect MIDI controller to column controls (bidirectional wiring)
+midi_ctrl:set_column_controls(column_ctrl)
 
 -- Wrapper functions for use as notifier callbacks (notifiers cannot receive 'self')
 local function rebuild_column_controls()
@@ -157,48 +144,6 @@ end
 
 local function update_all_controllers()
     column_ctrl:update_all()
-end
-
--- MIDI event handler
-local function midi_callback(message)
-    local status = message[1]
-    local control_cc = message[2] or 0
-    local value_cc = message[3] or 0
-
-    local channel = (status % 16) + 1
-    local command = status - (status % 16)
-
-    if command == 176 and value_cc == 127 or value_cc == 0 then
-        if value_cc == 127 then
-            if column_ctrl.last_controls[control_cc] then
-                column_ctrl.last_controls[control_cc].number_of_steps_to_change_value = 1
-            end
-        elseif value_cc == 0 then
-            local control_info = column_ctrl.controls[control_cc]
-            if control_info then
-                local is_effect_column = (control_info.effect_column_index ~= nil)
-                local column_index = control_info.note_column_index or control_info.effect_column_index or 0
-                local automation_parameter = control_info.automation_parameter
-                column_ctrl:set_selection(control_info.type, column_index, is_effect_column, automation_parameter)
-                if column_ctrl.last_controls[control_cc] then
-                    column_ctrl.last_controls[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
-                end
-            end
-        end
-    elseif command == 176 and column_ctrl:is_ready_to_modify(command, channel, control_cc, CONTROL_CHANNEL) then
-        local control_info = column_ctrl.controls[control_cc]
-        if control_info then
-            local is_effect_column = (control_info.effect_column_index ~= nil)
-            local column_index = control_info.note_column_index or control_info.effect_column_index or 0
-            local automation_parameter = control_info.automation_parameter
-
-            if value_cc == INCREASE_VALUE then
-                column_ctrl:modify_column_value(control_info.type, column_index, control_cc, 1, is_effect_column, automation_parameter)
-            elseif value_cc == DECREASE_VALUE then
-                column_ctrl:modify_column_value(control_info.type, column_index, control_cc, -1, is_effect_column, automation_parameter)
-            end
-        end
-    end
 end
 
 -- Function to start position monitoring
@@ -382,37 +327,12 @@ local function detach_observers()
     observers_attached = false
 end
 
--- Function to initialize MIDI devices
+-- Function to initialize MIDI devices and observers
 local function initialize()
-    if midi_device then
-        midi_device:close()
-        midi_device = nil
-    end
-    if midi_output_device then
-        midi_output_device:close()
-        midi_output_device = nil
-    end
-
     detach_observers()
+    midi_ctrl:close()
 
-    local available_input_devices = renoise.Midi.available_input_devices()
-    local available_output_devices = renoise.Midi.available_output_devices()
-
-    for i = 1, table.getn(available_input_devices) do
-        if available_input_devices[i] == DEVICE_NAME then
-            midi_device = renoise.Midi.create_input_device(DEVICE_NAME, midi_callback)
-            break
-        end
-    end
-
-    for i = 1, table.getn(available_output_devices) do
-        if available_output_devices[i] == DEVICE_NAME then
-            midi_output_device = renoise.Midi.create_output_device(DEVICE_NAME)
-            break
-        end
-    end
-
-    if midi_output_device then
+    if midi_ctrl:open() then
         rebuild_column_controls()
         attach_observers()
         attach_column_observers()
@@ -420,7 +340,6 @@ local function initialize()
         update_all_controllers()
     end
 end
-
 
 -- Add menu entry to reconnect if needed
 renoise.tool():add_menu_entry {
@@ -431,14 +350,7 @@ renoise.tool():add_menu_entry {
 -- Cleanup when tool is unloaded
 renoise.tool().app_release_document_observable:add_notifier(function()
     detach_observers()
-    if midi_device then
-        midi_device:close()
-        midi_device = nil
-    end
-    if midi_output_device then
-        midi_output_device:close()
-        midi_output_device = nil
-    end
+    midi_ctrl:close()
 end)
 
 renoise.tool().app_new_document_observable:add_notifier(function()
