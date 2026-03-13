@@ -10,88 +10,88 @@
 --   get_effect_command   (function)  lookup function(number_value) -> command table or nil
 
 local AmountNibbleParam = {}
+AmountNibbleParam.__index = AmountNibbleParam
 
 function AmountNibbleParam.new(config)
-    local num_prop  = config.number_property
-    local amt_prop  = config.amount_property
-    local is_high   = config.is_high_nibble
-    local get_cmd   = config.get_effect_command
+    local self = setmetatable({}, AmountNibbleParam)
+    self.num_prop = config.number_property
+    self.amt_prop = config.amount_property
+    self.is_high  = config.is_high_nibble
+    self.get_cmd  = config.get_effect_command
+    return self
+end
 
-    local getter, setter, max_value
+function AmountNibbleParam:_command(col)
+    return self.get_cmd(col[self.num_prop])
+end
 
-    if is_high then
-        getter = function(col)
-            local cmd = get_cmd(col[num_prop])
-            if cmd and cmd.is_xy then
-                return math.floor(col[amt_prop] / 16)
-            else
-                return col[amt_prop]
-            end
-        end
-
-        setter = function(col, value, _)
-            local cmd = get_cmd(col[num_prop])
-            if cmd and cmd.is_xy then
-                local low = col[amt_prop] % 16
-                col[amt_prop] = value * 16 + low
-            else
-                col[amt_prop] = value
-            end
-        end
-
-        max_value = function(col)
-            if col then
-                local cmd = get_cmd(col[num_prop])
-                if cmd then
-                    if cmd.is_xy then
-                        return cmd.x_max
-                    end
-                    return cmd.max
-                end
-            end
-            return 255
+function AmountNibbleParam:getter(col)
+    local cmd = self:_command(col)
+    if self.is_high then
+        if cmd and cmd.is_xy then
+            return math.floor(col[self.amt_prop] / 16)
+        else
+            return col[self.amt_prop]
         end
     else
-        getter = function(col)
-            local cmd = get_cmd(col[num_prop])
-            if cmd and cmd.is_xy then
-                return col[amt_prop] % 16
-            end
-            return 0
+        if cmd and cmd.is_xy then
+            return col[self.amt_prop] % 16
         end
+        return 0
+    end
+end
 
-        setter = function(col, value, _)
-            local cmd = get_cmd(col[num_prop])
-            if cmd and cmd.is_xy then
-                local high = math.floor(col[amt_prop] / 16)
-                col[amt_prop] = high * 16 + value
-            end
+function AmountNibbleParam:setter(col, value, _)
+    local cmd = self:_command(col)
+    if self.is_high then
+        if cmd and cmd.is_xy then
+            local low = col[self.amt_prop] % 16
+            col[self.amt_prop] = value * 16 + low
+        else
+            col[self.amt_prop] = value
         end
+    else
+        if cmd and cmd.is_xy then
+            local high = math.floor(col[self.amt_prop] / 16)
+            col[self.amt_prop] = high * 16 + value
+        end
+    end
+end
 
-        max_value = function(col)
-            if col then
-                local cmd = get_cmd(col[num_prop])
-                if cmd and cmd.is_xy then
-                    return cmd.y_max
+function AmountNibbleParam:min_value(_)
+    return 0
+end
+
+function AmountNibbleParam:max_value(col)
+    if self.is_high then
+        if col then
+            local cmd = self:_command(col)
+            if cmd then
+                if cmd.is_xy then
+                    return cmd.x_max
                 end
+                return cmd.max
             end
-            return 0
         end
+        return 255
+    else
+        if col then
+            local cmd = self:_command(col)
+            if cmd and cmd.is_xy then
+                return cmd.y_max
+            end
+        end
+        return 0
     end
+end
 
-    -- Absent when the command itself is empty (number property == 0)
-    local is_absent = function(col)
-        return col[num_prop] == 0
-    end
+-- Absent when the command itself is empty (number property == 0)
+function AmountNibbleParam:is_absent(col)
+    return col[self.num_prop] == 0
+end
 
-    return {
-        getter        = getter,
-        setter        = setter,
-        min_value     = function(_) return 0 end,
-        max_value     = max_value,
-        is_absent     = is_absent,
-        default_value = function(_) return 0 end,
-    }
+function AmountNibbleParam:default_value(_)
+    return 0
 end
 
 return AmountNibbleParam

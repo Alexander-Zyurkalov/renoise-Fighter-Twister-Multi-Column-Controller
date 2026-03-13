@@ -171,8 +171,8 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
                     local columns = is_effect_column and line.effect_columns or line.note_columns
                     if columns and column_index <= table.getn(columns) then
                         local col = columns[column_index]
-                        local prev_value = params.getter(col)
-                        if not params.is_absent(col) then
+                        local prev_value = params:getter(col)
+                        if not params:is_absent(col) then
                             return prev_value
                         end
                     end
@@ -181,7 +181,7 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
         end
     end
 
-    return params.default_value(nil)
+    return params:default_value(nil)
 end
 
 -- Column parameter modules
@@ -591,7 +591,7 @@ local function has_value_at_current_position(column_type, column_index, is_effec
         local params = COLUMN_PARAMS[column_type]
 
         if params then
-            return not params.is_absent(column)
+            return not params:is_absent(column)
         end
     end
 
@@ -611,7 +611,7 @@ local function get_current_column_value(column_type, column_index, is_effect_col
         if return_value_quantum == 0 then
             return_value_quantum = 1
         end
-        return params.getter(automation_parameter), automation_parameter, return_value_quantum
+        return params:getter(automation_parameter), automation_parameter, return_value_quantum
     end
 
     local song = renoise.song()
@@ -636,10 +636,10 @@ local function get_current_column_value(column_type, column_index, is_effect_col
             return 0, nil
         end
 
-        local column_value = params.getter(column)
+        local column_value = params:getter(column)
 
         -- Handle empty values by looking back through previous lines
-        if params.is_absent(column) then
+        if params:is_absent(column) then
             column_value = search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
         end
 
@@ -715,8 +715,8 @@ local function map_to_midi_range(column_type, current_value, automation_paramete
         return current_value -- Already in 0-127 range
     end
 
-    local max_val = params.max_value(column)
-    local min_val = params.min_value(column)
+    local max_val = params:max_value(column)
+    local min_val = params:min_value(column)
     local range = max_val - min_val
     if range <= 0 then
         return 0
@@ -795,11 +795,11 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
         return
     end
 
-    local max_val = params.max_value(column)
-    local min_val = params.min_value(column)
+    local max_val = params:max_value(column)
+    local min_val = params:min_value(column)
     local new_value = current_value
 
-    local real_value = params.getter(column)
+    local real_value = params:getter(column)
 
 
     if real_value == current_value then
@@ -816,7 +816,7 @@ local function modify_column_value(column_type, column_index, cc, direction, is_
         end
     end
 
-    params.setter(column, new_value, column_index)
+    params:setter(column, new_value, column_index)
     set_selection(column_type, column_index, is_effect_column, automation_parameter)
 
     -- Send feedback with mapped MIDI value

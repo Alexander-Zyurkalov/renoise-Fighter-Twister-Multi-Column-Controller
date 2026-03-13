@@ -8,39 +8,40 @@
 --   default         (number)  default value when nothing found  (optional, 0)
 
 local SimpleColumnParam = {}
+SimpleColumnParam.__index = SimpleColumnParam
 
 function SimpleColumnParam.new(config)
-    local property        = config.property
-    local min             = config.min or 0
-    local max             = config.max
-    local absent_sentinel = config.absent_sentinel
-    local default         = config.default or 0
+    local self = setmetatable({}, SimpleColumnParam)
+    self.property        = config.property
+    self.min             = config.min or 0
+    self.max             = config.max
+    self.absent_sentinel = config.absent_sentinel
+    self.default         = config.default or 0
+    return self
+end
 
-    return {
-        getter = function(col)
-            return col[property]
-        end,
+function SimpleColumnParam:getter(col)
+    return col[self.property]
+end
 
-        setter = function(col, value, _)
-            col[property] = value
-        end,
+function SimpleColumnParam:setter(col, value, _)
+    col[self.property] = value
+end
 
-        min_value = function(_)
-            return min
-        end,
+function SimpleColumnParam:min_value()
+    return self.min
+end
 
-        max_value = function(_)
-            return max
-        end,
+function SimpleColumnParam:max_value()
+    return self.max
+end
 
-        is_absent = function(col)
-            return col[property] == absent_sentinel
-        end,
+function SimpleColumnParam:is_absent(col)
+    return col[self.property] == self.absent_sentinel
+end
 
-        default_value = function(_)
-            return default
-        end,
-    }
+function SimpleColumnParam:default_value()
+    return self.default
 end
 
 return SimpleColumnParam

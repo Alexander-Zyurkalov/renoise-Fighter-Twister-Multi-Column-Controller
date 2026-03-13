@@ -6,49 +6,51 @@
 --   is_high_byte    (boolean)  true = xx (bits 15-8), false = yy (bits 7-0)
 
 local NumberByteParam = {}
+NumberByteParam.__index = NumberByteParam
 
 function NumberByteParam.new(config)
-    local prop    = config.value_property
-    local is_high = config.is_high_byte
+    local self = setmetatable({}, NumberByteParam)
+    self.prop    = config.value_property
+    self.is_high = config.is_high_byte
+    return self
+end
 
-    local getter, setter, is_absent
-
-    if is_high then
-        getter = function(col)
-            return math.floor(col[prop] / 256)
-        end
-
-        setter = function(col, value, _)
-            local low = col[prop] % 256
-            col[prop] = value * 256 + low
-        end
-
-        is_absent = function(col)
-            return math.floor(col[prop] / 256) == 0
-        end
+function NumberByteParam:getter(col)
+    if self.is_high then
+        return math.floor(col[self.prop] / 256)
     else
-        getter = function(col)
-            return col[prop] % 256
-        end
-
-        setter = function(col, value, _)
-            local high = math.floor(col[prop] / 256)
-            col[prop] = high * 256 + value
-        end
-
-        is_absent = function(col)
-            return col[prop] % 256 == 0
-        end
+        return col[self.prop] % 256
     end
+end
 
-    return {
-        getter        = getter,
-        setter        = setter,
-        min_value     = function(_) return 0  end,
-        max_value     = function(_) return 35 end,
-        is_absent     = is_absent,
-        default_value = function(_) return 0  end,
-    }
+function NumberByteParam:setter(col, value, _)
+    if self.is_high then
+        local low = col[self.prop] % 256
+        col[self.prop] = value * 256 + low
+    else
+        local high = math.floor(col[self.prop] / 256)
+        col[self.prop] = high * 256 + value
+    end
+end
+
+function NumberByteParam:min_value(_)
+    return 0
+end
+
+function NumberByteParam:max_value(_)
+    return 35
+end
+
+function NumberByteParam:is_absent(col)
+    if self.is_high then
+        return math.floor(col[self.prop] / 256) == 0
+    else
+        return col[self.prop] % 256 == 0
+    end
+end
+
+function NumberByteParam:default_value(_)
+    return 0
 end
 
 return NumberByteParam
