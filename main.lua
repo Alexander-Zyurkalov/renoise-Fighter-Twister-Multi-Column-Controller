@@ -48,6 +48,7 @@ local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28
 --   automation_parameter = renoise.DeviceParameter (for automation controls)
 -- }
 local COLUMN_CONTROLS = {}
+local LAST_CONTROLS = {}
 
 local function search_backwards(song, is_effect_column, current_line_index, column_index, params)
     local track_index = song.selected_track_index
@@ -401,7 +402,7 @@ local function rebuild_column_controls()
 
     -- Apply new mappings
     COLUMN_CONTROLS = new_column_controls
-    last_controls = new_last_controls
+    LAST_CONTROLS = new_last_controls
 
     print("MIDI Fighter Twister: Column controls rebuilt")
     for cc, control_info in pairs(COLUMN_CONTROLS) do
@@ -698,7 +699,7 @@ end
 
 -- Function to check if ready to modify for a specific CC
 local function is_ready_to_modify(command, channel, control_cc)
-    local last_control = last_controls[control_cc]
+    local last_control = LAST_CONTROLS[control_cc]
     if not last_control then
         return false
     end
@@ -740,8 +741,8 @@ local function midi_callback(message)
 
     if command == 176 and value_cc == 127 or value_cc == 0 then
         if value_cc == 127 then
-            if last_controls[control_cc] then
-                last_controls[control_cc].number_of_steps_to_change_value = 1
+            if LAST_CONTROLS[control_cc] then
+                LAST_CONTROLS[control_cc].number_of_steps_to_change_value = 1
             end
         elseif value_cc == 0 then
             local control_info = COLUMN_CONTROLS[control_cc]
@@ -750,8 +751,8 @@ local function midi_callback(message)
                 local column_index = control_info.note_column_index or control_info.effect_column_index or 0
                 local automation_parameter = control_info.automation_parameter
                 set_selection(control_info.type, column_index, is_effect_column, automation_parameter)
-                if last_controls[control_cc] then
-                    last_controls[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
+                if LAST_CONTROLS[control_cc] then
+                    LAST_CONTROLS[control_cc].number_of_steps_to_change_value = NUMBER_OF_STEPS_TO_CHANGE_VALUE
                 end
             end
         end
