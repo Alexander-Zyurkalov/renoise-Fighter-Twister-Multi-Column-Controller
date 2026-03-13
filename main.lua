@@ -2,6 +2,7 @@
 -- Controls volume, pan, delay, FX number/amount columns, effect number/amount columns, and ALL AUTOMATIONS with feedback
 -- Dynamically assigns CCs to control ALL visible note columns, effect columns, and all existing automations
 -- Sends color feedback: Green if value exists, Blue if empty, Red for fx/effects, Purple for automation
+-- Supports both pattern editing and phrase editing, routed by active middle frame
 
 -- Observer state
 local observers_attached = false
@@ -32,7 +33,9 @@ local COLOR_CONFIG = {
 -- Available CC numbers pool (modify this list as needed)
 local AVAILABLE_CCS = { 12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3, 28, 29, 30, 31, 24, 25, 26, 27, 20, 21, 22, 23, 16, 17, 18, 19, 44, 45, 46, 47 }
 
-local function search_backwards(song, is_effect_column, current_line_index, column_index, params)
+-- Search backwards across patterns in the sequence
+local function search_backwards_in_pattern(is_effect_column, current_line_index, column_index, params)
+    local song = renoise.song()
     local track_index = song.selected_track_index
     local pattern_sequence = song.sequencer.pattern_sequence
 
@@ -50,11 +53,33 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
                     local columns = is_effect_column and line.effect_columns or line.note_columns
                     if columns and column_index <= #columns then
                         local col = columns[column_index]
-                        local prev_value = params:getter(col)
                         if not params:is_absent(col) then
-                            return prev_value
+                            return params:getter(col)
                         end
                     end
+                end
+            end
+        end
+    end
+
+    return params:default_value(nil)
+end
+
+-- Search backwards within the current phrase only
+local function search_backwards_in_phrase(is_effect_column, current_line_index, column_index, params)
+    local phrase = renoise.song().selected_phrase
+    if not phrase then
+        return params:default_value(nil)
+    end
+
+    for line_index = current_line_index - 1, 1, -1 do
+        local line = phrase:line(line_index)
+        if line then
+            local columns = is_effect_column and line.effect_columns or line.note_columns
+            if columns and column_index <= #columns then
+                local col = columns[column_index]
+                if not params:is_absent(col) then
+                    return params:getter(col)
                 end
             end
         end
@@ -70,6 +95,7 @@ local AmountNibbleParam = require("amount_nibble_param")
 local AutomationValueParam = require("automation_value_param")
 local AutomationScalingParam = require("automation_scaling_param")
 local AutomationPrevScalingParam = require("automation_prev_scaling_param")
+local AutomationHelpers = require("automation_helpers")
 
 -- Column parameter configuration hash-map
 local COLUMN_PARAMS = {
@@ -111,6 +137,22 @@ local COLUMN_PARAMS = {
     automation_prev_scaling = AutomationPrevScalingParam.new(),
 }
 
+-- Phrase column params: same as pattern but without automation entries
+local PHRASE_COLUMN_PARAMS = {
+    note = COLUMN_PARAMS.note,
+    volume = COLUMN_PARAMS.volume,
+    pan = COLUMN_PARAMS.pan,
+    delay = COLUMN_PARAMS.delay,
+    fx_number_xx = COLUMN_PARAMS.fx_number_xx,
+    fx_number_yy = COLUMN_PARAMS.fx_number_yy,
+    fx_amount_x = COLUMN_PARAMS.fx_amount_x,
+    fx_amount_y = COLUMN_PARAMS.fx_amount_y,
+    effect_number_xx = COLUMN_PARAMS.effect_number_xx,
+    effect_number_yy = COLUMN_PARAMS.effect_number_yy,
+    effect_amount_x = COLUMN_PARAMS.effect_amount_x,
+    effect_amount_y = COLUMN_PARAMS.effect_amount_y,
+}
+
 -- Create MIDI controller
 local MidiController = require("midi_controller")
 local midi_ctrl = MidiController.new({
@@ -122,28 +164,72 @@ local midi_ctrl = MidiController.new({
     number_of_steps = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
 })
 
--- Create column controls, wired to MIDI controller for feedback
+-- Create adapters
+local PatternAdapter = require("pattern_adapter")
+local PhraseAdapter = require("phrase_adapter")
+
+local pattern_adapter = PatternAdapter.new({
+    automation_helpers = AutomationHelpers,
+})
+local phrase_adapter = PhraseAdapter.new()
+
+-- Create column controls instances, wired to MIDI controller for feedback
 local ColumnControls = require("column_controls")
-local column_ctrl = ColumnControls.new({
+
+local pattern_ctrl = ColumnControls.new({
+    adapter = pattern_adapter,
     available_ccs = AVAILABLE_CCS,
     number_of_steps = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
     column_params = COLUMN_PARAMS,
     color_config = COLOR_CONFIG,
-    send_midi_feedback = function(cc, value) midi_ctrl:send_feedback(cc, value) end,
-    send_color_feedback = function(cc, color) midi_ctrl:send_color(cc, color) end,
-    search_backwards = search_backwards,
+    send_midi_feedback = function(cc, value)
+        midi_ctrl:send_feedback(cc, value)
+    end,
+    send_color_feedback = function(cc, color)
+        midi_ctrl:send_color(cc, color)
+    end,
+    search_backwards = search_backwards_in_pattern,
 })
 
--- Connect MIDI controller to column controls (bidirectional wiring)
-midi_ctrl:set_column_controls(column_ctrl)
+local phrase_ctrl = ColumnControls.new({
+    adapter = phrase_adapter,
+    available_ccs = AVAILABLE_CCS,
+    number_of_steps = NUMBER_OF_STEPS_TO_CHANGE_VALUE,
+    column_params = PHRASE_COLUMN_PARAMS,
+    color_config = COLOR_CONFIG,
+    send_midi_feedback = function(cc, value)
+        midi_ctrl:send_feedback(cc, value)
+    end,
+    send_color_feedback = function(cc, color)
+        midi_ctrl:send_color(cc, color)
+    end,
+    search_backwards = search_backwards_in_phrase,
+})
 
--- Wrapper functions for use as notifier callbacks (notifiers cannot receive 'self')
+-- Resolve which ColumnControls instance is active based on middle frame
+local function get_active_column_ctrl()
+    local frame = renoise.app().window.active_middle_frame
+    if frame == renoise.ApplicationWindow.MIDDLE_FRAME_INSTRUMENT_PHRASE_EDITOR then
+        return phrase_ctrl
+    else
+        return pattern_ctrl
+    end
+end
+
+-- Connect MIDI controller to the resolver
+midi_ctrl:set_column_controls_resolver(get_active_column_ctrl)
+
+-- Wrapper functions for use as notifier callbacks
 local function rebuild_column_controls()
-    column_ctrl:rebuild()
+    pattern_ctrl:rebuild()
+    phrase_ctrl:rebuild()
 end
 
 local function update_all_controllers()
-    column_ctrl:update_all()
+    local active = get_active_column_ctrl()
+    if active then
+        active:update_all()
+    end
 end
 
 -- Function to start position monitoring
@@ -164,7 +250,7 @@ local function stop_position_timer()
     end
 end
 
--- Function to attach automation observers
+-- Function to attach automation observers (pattern only)
 local function attach_automation_observers()
     if automation_observers_attached then
         return
@@ -298,6 +384,11 @@ local function attach_observers()
         song.selected_pattern_index_observable:add_notifier(update_all_controllers)
     end
 
+    -- Rebuild phrase controls when a different phrase is selected
+    if song.selected_phrase_observable:has_notifier(rebuild_column_controls) == false then
+        song.selected_phrase_observable:add_notifier(rebuild_column_controls)
+    end
+
     start_position_timer()
 
     observers_attached = true
@@ -317,6 +408,10 @@ local function detach_observers()
 
     if song.selected_pattern_index_observable:has_notifier(update_all_controllers) then
         song.selected_pattern_index_observable:remove_notifier(update_all_controllers)
+    end
+
+    if song.selected_phrase_observable:has_notifier(rebuild_column_controls) then
+        song.selected_phrase_observable:remove_notifier(rebuild_column_controls)
     end
 
     detach_column_observers()

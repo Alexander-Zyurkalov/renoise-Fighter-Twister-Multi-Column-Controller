@@ -1,25 +1,26 @@
 -- Column Controls module
 -- Manages dynamic CC-to-column mappings and MIDI controller state
 -- Uses __index metatable pattern for OOP
-
-local AutomationHelpers = require("automation_helpers")
+-- All Renoise access is delegated to an adapter (pattern or phrase)
 
 local ColumnControls = {}
 ColumnControls.__index = ColumnControls
 
 --- Create a new ColumnControls instance
 -- @param config table with:
---   available_ccs          - list of CC numbers to allocate
---   number_of_steps        - steps before value change triggers
---   column_params          - COLUMN_PARAMS hash-map
---   color_config           - table of color constants
---   send_midi_feedback     - function(cc, value)
---   send_color_feedback    - function(cc, color)
---   search_backwards       - function(song, is_effect, line_index, col_index, params)
+--   adapter              - Renoise adapter (PatternAdapter or PhraseAdapter)
+--   available_ccs        - list of CC numbers to allocate
+--   number_of_steps      - steps before value change triggers
+--   column_params        - COLUMN_PARAMS hash-map
+--   color_config         - table of color constants
+--   send_midi_feedback   - function(cc, value)
+--   send_color_feedback  - function(cc, color)
+--   search_backwards     - function(is_effect, line_index, col_index, params)
 function ColumnControls.new(config)
     local self = setmetatable({}, ColumnControls)
 
     -- Dependencies
+    self.adapter = config.adapter
     self.available_ccs = config.available_ccs
     self.number_of_steps = config.number_of_steps
     self.column_params = config.column_params
@@ -57,7 +58,7 @@ function ColumnControls:get_column_color(column_type, has_value, automation_para
         end
     elseif column_type == "automation_prev_scaling" then
         if automation_parameter and automation_parameter.is_automated then
-            local _, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
+            local _, prev_point = self.adapter:get_automation_and_prev_point(automation_parameter)
             if prev_point then
                 return C.AUTOMATION_PREV_SCALING_COLOR
             else
@@ -99,10 +100,9 @@ function ColumnControls:get_column_color(column_type, has_value, automation_para
     end
 end
 
---- Rebuild controls based on current track's visible columns
+--- Rebuild controls based on current track's (or phrase's) visible columns
 function ColumnControls:rebuild()
-    local song = renoise.song()
-    local track = song.selected_track
+    local track = self.adapter:get_track()
 
     -- Store old mappings before clearing
     local old_controls = {}
@@ -114,141 +114,142 @@ function ColumnControls:rebuild()
     local new_controls = {}
     local new_last_controls = {}
 
-    local cc_index = 1
-    local num_visible_note_columns = track.visible_note_columns
-    local num_visible_effect_columns = track.visible_effect_columns
+    -- Only assign CCs if track/phrase is available
+    if track then
+        local cc_index = 1
+        local num_visible_note_columns = track.visible_note_columns
+        local num_visible_effect_columns = track.visible_effect_columns
 
-    -- Assign first CC for cursor position control
-    if cc_index <= #self.available_ccs then
-        local cc = self.available_ccs[cc_index]
-        new_controls[cc] = {
-            type = "cursor",
-            note_column_index = 1
-        }
-        new_last_controls[cc] = {
-            command = 0,
-            channel = 0,
-            control_cc = 0,
-            value = 0,
-            count = 0,
-            number_of_steps_to_change_value = self.number_of_steps,
-        }
-        cc_index = cc_index + 1
-    end
-
-    -- Assign CCs for all visible note columns
-    for note_col_idx = 1, num_visible_note_columns do
-        local column_params = {}
-
-        -- Add optional column types if they're visible
-        if track.volume_column_visible then
-            table.insert(column_params, "volume")
+        -- Assign first CC for cursor position control
+        if cc_index <= #self.available_ccs then
+            local cc = self.available_ccs[cc_index]
+            new_controls[cc] = {
+                type = "cursor",
+                note_column_index = 1
+            }
+            new_last_controls[cc] = {
+                command = 0,
+                channel = 0,
+                control_cc = 0,
+                value = 0,
+                count = 0,
+                number_of_steps_to_change_value = self.number_of_steps,
+            }
+            cc_index = cc_index + 1
         end
 
-        if track.panning_column_visible then
-            table.insert(column_params, "pan")
-        end
+        -- Assign CCs for all visible note columns
+        for note_col_idx = 1, num_visible_note_columns do
+            local column_params = {}
 
-        if track.delay_column_visible then
-            table.insert(column_params, "delay")
-        end
+            if track.volume_column_visible then
+                table.insert(column_params, "volume")
+            end
 
-        if track.sample_effects_column_visible then
-            table.insert(column_params, "fx_number_xx")
-            table.insert(column_params, "fx_number_yy")
-            table.insert(column_params, "fx_amount_x")
-            table.insert(column_params, "fx_amount_y")
-        end
+            if track.panning_column_visible then
+                table.insert(column_params, "pan")
+            end
 
-        -- Assign CCs for this note column's parameters
-        for _, param_type in ipairs(column_params) do
-            if cc_index <= #self.available_ccs then
-                local cc = self.available_ccs[cc_index]
-                new_controls[cc] = {
-                    type = param_type,
-                    note_column_index = note_col_idx
-                }
+            if track.delay_column_visible then
+                table.insert(column_params, "delay")
+            end
 
-                new_last_controls[cc] = {
-                    command = 0,
-                    channel = 0,
-                    control_cc = 0,
-                    value = 0,
-                    count = 0,
-                    number_of_steps_to_change_value = self.number_of_steps,
-                }
+            if track.sample_effects_column_visible then
+                table.insert(column_params, "fx_number_xx")
+                table.insert(column_params, "fx_number_yy")
+                table.insert(column_params, "fx_amount_x")
+                table.insert(column_params, "fx_amount_y")
+            end
 
-                cc_index = cc_index + 1
-            else
+            for _, param_type in ipairs(column_params) do
+                if cc_index <= #self.available_ccs then
+                    local cc = self.available_ccs[cc_index]
+                    new_controls[cc] = {
+                        type = param_type,
+                        note_column_index = note_col_idx
+                    }
+
+                    new_last_controls[cc] = {
+                        command = 0,
+                        channel = 0,
+                        control_cc = 0,
+                        value = 0,
+                        count = 0,
+                        number_of_steps_to_change_value = self.number_of_steps,
+                    }
+
+                    cc_index = cc_index + 1
+                else
+                    break
+                end
+            end
+
+            if cc_index > #self.available_ccs then
                 break
             end
         end
 
-        if cc_index > #self.available_ccs then
-            break
-        end
-    end
+        -- Assign CCs for all visible effect columns
+        for effect_col_idx = 1, num_visible_effect_columns do
+            local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount_x", "effect_amount_y" }
 
-    -- Assign CCs for all visible effect columns
-    for effect_col_idx = 1, num_visible_effect_columns do
-        local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount_x", "effect_amount_y" }
+            for _, param_type in ipairs(effect_params) do
+                if cc_index <= #self.available_ccs then
+                    local cc = self.available_ccs[cc_index]
+                    new_controls[cc] = {
+                        type = param_type,
+                        effect_column_index = effect_col_idx
+                    }
 
-        for _, param_type in ipairs(effect_params) do
-            if cc_index <= #self.available_ccs then
-                local cc = self.available_ccs[cc_index]
-                new_controls[cc] = {
-                    type = param_type,
-                    effect_column_index = effect_col_idx
-                }
+                    new_last_controls[cc] = {
+                        command = 0,
+                        channel = 0,
+                        control_cc = 0,
+                        value = 0,
+                        count = 0,
+                        number_of_steps_to_change_value = self.number_of_steps,
+                    }
 
-                new_last_controls[cc] = {
-                    command = 0,
-                    channel = 0,
-                    control_cc = 0,
-                    value = 0,
-                    count = 0,
-                    number_of_steps_to_change_value = self.number_of_steps,
-                }
+                    cc_index = cc_index + 1
+                else
+                    break
+                end
+            end
 
-                cc_index = cc_index + 1
-            else
+            if cc_index > #self.available_ccs then
                 break
             end
         end
 
-        if cc_index > #self.available_ccs then
-            break
-        end
-    end
+        -- Add automation controls (adapter returns {} for phrases)
+        local all_automations = self.adapter:get_all_automations()
+        for _, automation_param in ipairs(all_automations) do
+            local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
+            for _, param_type in ipairs(automation_params) do
+                if cc_index <= #self.available_ccs then
+                    local cc = self.available_ccs[cc_index]
+                    new_controls[cc] = {
+                        type = param_type,
+                        automation_parameter = automation_param
+                    }
+                    new_last_controls[cc] = {
+                        command = 0,
+                        channel = 0,
+                        control_cc = 0,
+                        value = 0,
+                        count = 0,
+                        number_of_steps_to_change_value = self.number_of_steps,
+                    }
 
-    -- Add automation controls for ALL existing automations
-    local all_automations = AutomationHelpers.get_all_track_automations()
-    for _, automation_param in ipairs(all_automations) do
-        local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
-        for _, param_type in ipairs(automation_params) do
-            if cc_index <= #self.available_ccs then
-                local cc = self.available_ccs[cc_index]
-                new_controls[cc] = {
-                    type = param_type,
-                    automation_parameter = automation_param
-                }
-                new_last_controls[cc] = {
-                    command = 0,
-                    channel = 0,
-                    control_cc = 0,
-                    value = 0,
-                    count = 0,
-                    number_of_steps_to_change_value = self.number_of_steps,
-                }
+                    cc_index = cc_index + 1
+                else
+                    break
+                end
+            end
 
-                cc_index = cc_index + 1
-            else
+            if cc_index > #self.available_ccs then
                 break
             end
-        end
-
-        if cc_index > #self.available_ccs then
-            break
         end
     end
 
@@ -290,12 +291,12 @@ function ColumnControls:rebuild()
 end
 
 --- Search backwards for a column value in previous lines
-function ColumnControls:search_backwards_for_value(column_type, column_index, current_line_index, song, is_effect_column)
+function ColumnControls:search_backwards_for_value(column_type, column_index, current_line_index, is_effect_column)
     local params = self.column_params[column_type]
     if not params then
         return 0
     end
-    return self.search_backwards(song, is_effect_column, current_line_index, column_index, params)
+    return self.search_backwards(is_effect_column, current_line_index, column_index, params)
 end
 
 --- Check if a value exists at the current position for a given column type and column index
@@ -309,12 +310,11 @@ function ColumnControls:has_value_at_current_position(column_type, column_index,
         if not automation_parameter then
             return false
         end
-        local automation, prev_point = AutomationHelpers.get_automation_and_prev_point(automation_parameter)
+        local _, prev_point = self.adapter:get_automation_and_prev_point(automation_parameter)
         return prev_point ~= nil
     end
 
-    local song = renoise.song()
-    local current_line = song.selected_line
+    local current_line = self.adapter:get_selected_line()
 
     if not current_line then
         return false
@@ -342,8 +342,7 @@ end
 --- Get current column value for a specific column
 function ColumnControls:get_current_column_value(column_type, column_index, is_effect_column, automation_parameter)
     if column_type == "cursor" then
-        local song = renoise.song()
-        return song.selected_line_index, nil, 1
+        return self.adapter:get_selected_line_index(), nil, 1
     end
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
         local params = self.column_params[column_type]
@@ -355,8 +354,7 @@ function ColumnControls:get_current_column_value(column_type, column_index, is_e
         return params:getter(automation_parameter), automation_parameter, return_value_quantum
     end
 
-    local song = renoise.song()
-    local current_line = song.selected_line
+    local current_line = self.adapter:get_selected_line()
 
     if not current_line then
         return 0, nil
@@ -381,7 +379,11 @@ function ColumnControls:get_current_column_value(column_type, column_index, is_e
 
         -- Handle empty values by looking back through previous lines
         if params:is_absent(column) then
-            column_value = self:search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
+            column_value = self:search_backwards_for_value(
+                    column_type, column_index,
+                    self.adapter:get_selected_line_index(),
+                    is_effect_column
+            )
         end
 
         return column_value, column, 1
@@ -396,46 +398,34 @@ function ColumnControls:set_selection(column_type, column_index, is_effect_colum
         return
     end
     if column_type == "automation" or column_type == "automation_scaling" or column_type == "automation_prev_scaling" then
-        if renoise.app().window.active_lower_frame ~= renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION then
-            renoise.app().window.active_lower_frame = renoise.ApplicationWindow.LOWER_FRAME_TRACK_AUTOMATION
-        end
-        if automation_parameter then
-            renoise.song().selected_automation_parameter = automation_parameter
-        end
+        self.adapter:enter_automation_view(automation_parameter)
         return
     end
 
-    local song = renoise.song()
-    local current_line = song.selected_line
+    local current_line = self.adapter:get_selected_line()
 
     if not current_line then
         return
     end
-    if (not is_effect_column) then
-        song.selected_note_column_index = column_index
+    if not is_effect_column then
+        self.adapter:set_note_column_index(column_index)
     else
-        song.selected_effect_column_index = column_index
-    end
-    local select_column = column_index
-    if is_effect_column then
-        select_column = song.selected_track.visible_note_columns + column_index
+        self.adapter:set_effect_column_index(column_index)
     end
 
-    song.selection_in_pattern = {
-        start_line = song.selected_line_index,
-        end_line = song.selected_line_index,
-        start_track = song.selected_track_index,
-        end_track = song.selected_track_index,
-        start_column = select_column,
-        end_column = select_column,
-    }
+    local select_column = column_index
+    if is_effect_column then
+        local track = self.adapter:get_track()
+        select_column = track.visible_note_columns + column_index
+    end
+
+    self.adapter:set_selection(self.adapter:get_selected_line_index(), select_column)
 end
 
 --- Map column value to MIDI range (0-127)
 function ColumnControls:map_to_midi_range(column_type, current_value, automation_parameter, column)
     if column_type == "cursor" then
-        local song = renoise.song()
-        local num_lines = song.selected_pattern.number_of_lines
+        local num_lines = self.adapter:get_number_of_lines()
         if num_lines <= 1 then
             return 0
         end
@@ -489,10 +479,9 @@ end
 
 --- Modify column value for a specific column
 function ColumnControls:modify_column_value(column_type, column_index, cc, direction, is_effect_column, automation_parameter)
-    local song = renoise.song()
     if column_type == "cursor" then
-        local current_line = song.selected_line_index
-        local num_lines = song.selected_pattern.number_of_lines
+        local current_line = self.adapter:get_selected_line_index()
+        local num_lines = self.adapter:get_number_of_lines()
         local new_line = current_line
 
         if direction > 0 then
@@ -507,7 +496,7 @@ function ColumnControls:modify_column_value(column_type, column_index, cc, direc
             end
         end
 
-        song.selected_line_index = new_line
+        self.adapter:set_selected_line_index(new_line)
 
         local midi_value = self:map_to_midi_range("cursor", new_line, nil, nil)
         self.send_midi_feedback(cc, midi_value)
@@ -515,7 +504,7 @@ function ColumnControls:modify_column_value(column_type, column_index, cc, direc
         return
     end
 
-    if not song.transport.edit_mode then
+    if not self.adapter:is_edit_mode() then
         return
     end
 

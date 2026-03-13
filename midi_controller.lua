@@ -28,15 +28,16 @@ function MidiController.new(config)
     self.input_device = nil
     self.output_device = nil
 
-    -- Will be set via set_column_controls after construction
-    self.column_ctrl = nil
+    -- Will be set via set_column_controls_resolver after construction
+    self.resolve_column_ctrl = nil
 
     return self
 end
 
---- Set the ColumnControls instance used for dispatching MIDI messages
-function MidiController:set_column_controls(column_ctrl)
-    self.column_ctrl = column_ctrl
+--- Set a resolver function that returns the active ColumnControls instance
+-- @param resolver_fn function() -> ColumnControls or nil
+function MidiController:set_column_controls_resolver(resolver_fn)
+    self.resolve_column_ctrl = resolver_fn
 end
 
 --- Check if the output device is open
@@ -64,9 +65,12 @@ function MidiController:send_color(cc, color_value)
     end
 end
 
---- MIDI message callback — parses incoming CC and dispatches to column_ctrl
+--- MIDI message callback — parses incoming CC and dispatches to active column_ctrl
 function MidiController:on_midi_message(message)
-    local column_ctrl = self.column_ctrl
+    if not self.resolve_column_ctrl then
+        return
+    end
+    local column_ctrl = self.resolve_column_ctrl()
     if not column_ctrl then
         return
     end
