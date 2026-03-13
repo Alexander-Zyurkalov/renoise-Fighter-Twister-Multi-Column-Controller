@@ -172,7 +172,7 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
                     if columns and column_index <= table.getn(columns) then
                         local col = columns[column_index]
                         local prev_value = params.getter(col)
-                        if prev_value ~= params.absent_value(col) then
+                        if not params.is_absent(col) then
                             return prev_value
                         end
                     end
@@ -184,8 +184,40 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
     return params.default_value(nil)
 end
 
+-- Helper: create a constant lambda from a value
+local function constant(v)
+    return function(_) return v end
+end
+
+-- Common constant lambdas (shared across COLUMN_PARAMS to avoid duplication)
+local ALWAYS_ZERO = constant(0)
+local ALWAYS_0xFF = constant(0xFF)
+local ALWAYS_0x80 = constant(0x80)
+local ALWAYS_0x40 = constant(0x40)
+local ALWAYS_35 = constant(35)
+local ALWAYS_127 = constant(127)
+local ALWAYS_64 = constant(64)
+
+-- Common is_absent lambdas
+
+-- fx_amount is absent only when the corresponding fx_number (effect_number_value) is absent
+local function is_absent_fx_amount(col)
+    return col.effect_number_value == 0
+end
+
+-- effect_amount is absent only when the corresponding effect_number (number_value) is absent
+local function is_absent_effect_amount(col)
+    return col.number_value == 0
+end
+
+-- automation types are never "absent" in the column sense (checked separately via automation_parameter)
+local function is_absent_never(_)
+    return false
+end
+
 -- Column parameter configuration hash-map
--- All value fields (min_value, max_value, absent_value, default_value) are lambdas: function(column) -> number
+-- All value fields (min_value, max_value, default_value) are lambdas: function(column) -> number
+-- is_absent: function(column) -> boolean, checks whether the column value should be treated as empty
 -- The column argument may be nil in some contexts (e.g. default_value at end of search_backwards)
 local COLUMN_PARAMS = {
     note = {
@@ -195,18 +227,12 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.note_value = value
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = constant(120),
+        is_absent = function(col)
+            return col.note_value == 121
         end,
-        max_value = function(_)
-            return 120
-        end,
-        absent_value = function(_)
-            return 121
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
     volume = {
         getter = function(note_column)
@@ -215,18 +241,12 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.volume_value = value
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_0x80,
+        is_absent = function(col)
+            return col.volume_value == 0xFF
         end,
-        max_value = function(_)
-            return 0x80
-        end,
-        absent_value = function(_)
-            return 0xFF
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
     pan = {
         getter = function(note_column)
@@ -235,18 +255,12 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.panning_value = value
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_0x80,
+        is_absent = function(col)
+            return col.panning_value == 0xFF
         end,
-        max_value = function(_)
-            return 0x80
-        end,
-        absent_value = function(_)
-            return 0xFF
-        end,
-        default_value = function(_)
-            return 0x40
-        end, -- Center pan
+        default_value = ALWAYS_0x40, -- Center pan
     },
     delay = {
         getter = function(note_column)
@@ -255,18 +269,12 @@ local COLUMN_PARAMS = {
         setter = function(note_column, value, note_column_index)
             note_column.delay_value = value
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_0xFF,
+        is_absent = function(col)
+            return col.delay_value == 0
         end,
-        max_value = function(_)
-            return 0xFF
-        end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
 
     -- Note column FX: effect_number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
@@ -278,18 +286,12 @@ local COLUMN_PARAMS = {
             local yy = note_column.effect_number_value % 256
             note_column.effect_number_value = value * 256 + yy
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_35,
+        is_absent = function(col)
+            return math.floor(col.effect_number_value / 256) == 0
         end,
-        max_value = function(_)
-            return 35
-        end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
     fx_number_yy = {
         getter = function(note_column)
@@ -299,18 +301,12 @@ local COLUMN_PARAMS = {
             local xx = math.floor(note_column.effect_number_value / 256)
             note_column.effect_number_value = xx * 256 + value
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_35,
+        is_absent = function(col)
+            return col.effect_number_value % 256 == 0
         end,
-        max_value = function(_)
-            return 35
-        end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
     -- Note column FX: effect_amount_value
     -- For xy effects: split into high nibble (x) and low nibble (y)
@@ -333,9 +329,7 @@ local COLUMN_PARAMS = {
                 note_column.effect_amount_value = value
             end
         end,
-        min_value = function(_)
-            return 0
-        end,
+        min_value = ALWAYS_ZERO,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.effect_number_value)
@@ -348,12 +342,8 @@ local COLUMN_PARAMS = {
             end
             return 255
         end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        is_absent = is_absent_fx_amount,
+        default_value = ALWAYS_ZERO,
     },
     fx_amount_y = {
         getter = function(note_column)
@@ -370,9 +360,7 @@ local COLUMN_PARAMS = {
                 note_column.effect_amount_value = x * 16 + value
             end
         end,
-        min_value = function(_)
-            return 0
-        end,
+        min_value = ALWAYS_ZERO,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.effect_number_value)
@@ -382,12 +370,8 @@ local COLUMN_PARAMS = {
             end
             return 0
         end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        is_absent = is_absent_fx_amount,
+        default_value = ALWAYS_ZERO,
     },
 
     -- Effect columns: number_value is 0xXXYY (16-bit), split into xx and yy chars (each 0..35)
@@ -399,18 +383,12 @@ local COLUMN_PARAMS = {
             local yy = effect_column.number_value % 256
             effect_column.number_value = value * 256 + yy
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_35,
+        is_absent = function(col)
+            return math.floor(col.number_value / 256) == 0
         end,
-        max_value = function(_)
-            return 35
-        end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
     effect_number_yy = {
         getter = function(effect_column)
@@ -420,18 +398,12 @@ local COLUMN_PARAMS = {
             local xx = math.floor(effect_column.number_value / 256)
             effect_column.number_value = xx * 256 + value
         end,
-        min_value = function(_)
-            return 0
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_35,
+        is_absent = function(col)
+            return col.number_value % 256 == 0
         end,
-        max_value = function(_)
-            return 35
-        end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        default_value = ALWAYS_ZERO,
     },
     -- Effect columns: amount_value
     -- For xy effects: split into high nibble (x) and low nibble (y)
@@ -454,9 +426,7 @@ local COLUMN_PARAMS = {
                 effect_column.amount_value = value
             end
         end,
-        min_value = function(_)
-            return 0
-        end,
+        min_value = ALWAYS_ZERO,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.number_value)
@@ -469,12 +439,8 @@ local COLUMN_PARAMS = {
             end
             return 255
         end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        is_absent = is_absent_effect_amount,
+        default_value = ALWAYS_ZERO,
     },
     effect_amount_y = {
         getter = function(effect_column)
@@ -491,9 +457,7 @@ local COLUMN_PARAMS = {
                 effect_column.amount_value = x * 16 + value
             end
         end,
-        min_value = function(_)
-            return 0
-        end,
+        min_value = ALWAYS_ZERO,
         max_value = function(column)
             if column then
                 local cmd = get_effect_command(column.number_value)
@@ -503,12 +467,8 @@ local COLUMN_PARAMS = {
             end
             return 0
         end,
-        absent_value = function(_)
-            return 0
-        end,
-        default_value = function(_)
-            return 0
-        end,
+        is_absent = is_absent_effect_amount,
+        default_value = ALWAYS_ZERO,
     },
 
     automation = {
@@ -546,18 +506,10 @@ local COLUMN_PARAMS = {
             end
             automation:add_point_at(line, normalized_value)
         end,
-        min_value = function(_)
-            return 0
-        end,
-        max_value = function(_)
-            return 127
-        end,
-        absent_value = function(_)
-            return -1
-        end,
-        default_value = function(_)
-            return 64
-        end, -- Middle value
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_127,
+        is_absent = is_absent_never,
+        default_value = ALWAYS_64, -- Middle value
     },
     automation_scaling = {
         getter = function(automation_parameter)
@@ -599,18 +551,10 @@ local COLUMN_PARAMS = {
 
             automation:add_point_at(line, current_point_value, scaling_value)
         end,
-        min_value = function(_)
-            return 0
-        end,
-        max_value = function(_)
-            return 127
-        end,
-        absent_value = function(_)
-            return -1
-        end,
-        default_value = function(_)
-            return 64
-        end,
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_127,
+        is_absent = is_absent_never,
+        default_value = ALWAYS_64,
     },
     automation_prev_scaling = {
         getter = function(automation_parameter)
@@ -641,18 +585,10 @@ local COLUMN_PARAMS = {
             automation:remove_point_at(prev_time)
             automation:add_point_at(prev_time, prev_value, scaling_value)
         end,
-        min_value = function(_)
-            return 0
-        end,
-        max_value = function(_)
-            return 127
-        end,
-        absent_value = function(_)
-            return -1
-        end,
-        default_value = function(_)
-            return 64
-        end,
+        min_value = ALWAYS_ZERO,
+        max_value = ALWAYS_127,
+        is_absent = is_absent_never,
+        default_value = ALWAYS_64,
     }
 }
 
@@ -993,8 +929,7 @@ local function has_value_at_current_position(column_type, column_index, is_effec
         local params = COLUMN_PARAMS[column_type]
 
         if params then
-            local value = params.getter(column)
-            return value ~= params.absent_value(column)
+            return not params.is_absent(column)
         end
     end
 
@@ -1042,7 +977,7 @@ local function get_current_column_value(column_type, column_index, is_effect_col
         local column_value = params.getter(column)
 
         -- Handle empty values by looking back through previous lines
-        if column_value == params.absent_value(column) then
+        if params.is_absent(column) then
             column_value = search_backwards_for_value(column_type, column_index, song.selected_line_index, song, is_effect_column)
         end
 
