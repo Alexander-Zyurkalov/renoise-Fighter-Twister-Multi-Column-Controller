@@ -965,7 +965,7 @@ local function detach_observers()
 end
 
 -- Function to initialize MIDI devices
-local function initialize_midi_devices()
+local function initialize()
     -- Close existing devices
     if midi_device then
         midi_device:close()
@@ -1013,7 +1013,7 @@ end
 -- Add menu entry to reconnect if needed
 renoise.tool():add_menu_entry {
     name = "Main Menu:Tools:Reconnect MIDI Fighter Twister",
-    invoke = initialize_midi_devices
+    invoke = initialize
 }
 
 -- Cleanup when tool is unloaded
@@ -1030,5 +1030,5 @@ renoise.tool().app_release_document_observable:add_notifier(function()
 end)
 
 renoise.tool().app_new_document_observable:add_notifier(function()
-    initialize_midi_devices()
+    initialize()
 end)
