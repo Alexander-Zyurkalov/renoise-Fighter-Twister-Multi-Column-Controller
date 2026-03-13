@@ -7,6 +7,7 @@
 -- Observer state
 local observers_attached = false
 local column_observers_attached = false
+local phrase_column_observers_attached = false
 local automation_observers_attached = false
 local position_timer = nil
 
@@ -358,6 +359,83 @@ local function detach_column_observers()
     column_observers_attached = false
 end
 
+-- Function to attach phrase column visibility observers
+local function attach_phrase_column_observers()
+    if phrase_column_observers_attached then
+        return
+    end
+
+    local phrase = renoise.song().selected_phrase
+    if not phrase then
+        return
+    end
+
+    if phrase.volume_column_visible_observable:has_notifier(rebuild_column_controls) == false then
+        phrase.volume_column_visible_observable:add_notifier(rebuild_column_controls)
+    end
+
+    if phrase.panning_column_visible_observable:has_notifier(rebuild_column_controls) == false then
+        phrase.panning_column_visible_observable:add_notifier(rebuild_column_controls)
+    end
+
+    if phrase.delay_column_visible_observable:has_notifier(rebuild_column_controls) == false then
+        phrase.delay_column_visible_observable:add_notifier(rebuild_column_controls)
+    end
+
+    if phrase.sample_effects_column_visible_observable:has_notifier(rebuild_column_controls) == false then
+        phrase.sample_effects_column_visible_observable:add_notifier(rebuild_column_controls)
+    end
+
+    if phrase.visible_note_columns_observable:has_notifier(rebuild_column_controls) == false then
+        phrase.visible_note_columns_observable:add_notifier(rebuild_column_controls)
+    end
+
+    if phrase.visible_effect_columns_observable:has_notifier(rebuild_column_controls) == false then
+        phrase.visible_effect_columns_observable:add_notifier(rebuild_column_controls)
+    end
+
+    phrase_column_observers_attached = true
+end
+
+-- Function to detach phrase column visibility observers
+local function detach_phrase_column_observers()
+    if not phrase_column_observers_attached then
+        return
+    end
+
+    local phrase = renoise.song().selected_phrase
+    if not phrase then
+        phrase_column_observers_attached = false
+        return
+    end
+
+    if phrase.volume_column_visible_observable:has_notifier(rebuild_column_controls) then
+        phrase.volume_column_visible_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    if phrase.panning_column_visible_observable:has_notifier(rebuild_column_controls) then
+        phrase.panning_column_visible_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    if phrase.delay_column_visible_observable:has_notifier(rebuild_column_controls) then
+        phrase.delay_column_visible_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    if phrase.sample_effects_column_visible_observable:has_notifier(rebuild_column_controls) then
+        phrase.sample_effects_column_visible_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    if phrase.visible_note_columns_observable:has_notifier(rebuild_column_controls) then
+        phrase.visible_note_columns_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    if phrase.visible_effect_columns_observable:has_notifier(rebuild_column_controls) then
+        phrase.visible_effect_columns_observable:remove_notifier(rebuild_column_controls)
+    end
+
+    phrase_column_observers_attached = false
+end
+
 -- Function to handle track changes (need to reattach column observers)
 local function on_track_changed()
     detach_column_observers()
@@ -365,6 +443,14 @@ local function on_track_changed()
     rebuild_column_controls()
     attach_column_observers()
     attach_automation_observers()
+    update_all_controllers()
+end
+
+-- Function to handle phrase changes (need to reattach phrase column observers)
+local function on_phrase_changed()
+    detach_phrase_column_observers()
+    rebuild_column_controls()
+    attach_phrase_column_observers()
     update_all_controllers()
 end
 
@@ -385,8 +471,8 @@ local function attach_observers()
     end
 
     -- Rebuild phrase controls when a different phrase is selected
-    if song.selected_phrase_observable:has_notifier(rebuild_column_controls) == false then
-        song.selected_phrase_observable:add_notifier(rebuild_column_controls)
+    if song.selected_phrase_observable:has_notifier(on_phrase_changed) == false then
+        song.selected_phrase_observable:add_notifier(on_phrase_changed)
     end
 
     start_position_timer()
@@ -410,11 +496,12 @@ local function detach_observers()
         song.selected_pattern_index_observable:remove_notifier(update_all_controllers)
     end
 
-    if song.selected_phrase_observable:has_notifier(rebuild_column_controls) then
-        song.selected_phrase_observable:remove_notifier(rebuild_column_controls)
+    if song.selected_phrase_observable:has_notifier(on_phrase_changed) then
+        song.selected_phrase_observable:remove_notifier(on_phrase_changed)
     end
 
     detach_column_observers()
+    detach_phrase_column_observers()
     detach_automation_observers()
 
     stop_position_timer()
@@ -431,6 +518,7 @@ local function initialize()
         rebuild_column_controls()
         attach_observers()
         attach_column_observers()
+        attach_phrase_column_observers()
         attach_automation_observers()
         update_all_controllers()
     end

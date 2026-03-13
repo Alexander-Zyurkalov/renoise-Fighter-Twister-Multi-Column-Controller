@@ -429,7 +429,8 @@ describe("ColumnControls", function()
         end)
 
         it("assigns automation CCs when adapter provides automations", function()
-            local auto_param = { name = "Cutoff", is_automated = true }
+            local auto_param = { name = "Cutoff", is_automated = true,
+                                 value_quantum = 0.01, value_max = 1.0, value_min = 0.0 }
             local adapter = make_adapter_stub({
                 visible_note_columns = 0,
                 visible_effect_columns = 0,
