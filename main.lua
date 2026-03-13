@@ -48,7 +48,7 @@ local function search_backwards(song, is_effect_column, current_line_index, colu
                 local line = track:line(line_index)
                 if line then
                     local columns = is_effect_column and line.effect_columns or line.note_columns
-                    if columns and column_index <= table.getn(columns) then
+                    if columns and column_index <= #columns then
                         local col = columns[column_index]
                         local prev_value = params:getter(col)
                         if not params:is_absent(col) then

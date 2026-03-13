@@ -126,18 +126,20 @@ function MidiController:open()
     local self_ref = self
 
     -- Open input device
-    for i = 1, table.getn(available_input_devices) do
+    for i = 1, #available_input_devices do
         if available_input_devices[i] == self.device_name then
             self.input_device = renoise.Midi.create_input_device(
-                self.device_name,
-                function(message) self_ref:on_midi_message(message) end
+                    self.device_name,
+                    function(message)
+                        self_ref:on_midi_message(message)
+                    end
             )
             break
         end
     end
 
     -- Open output device
-    for i = 1, table.getn(available_output_devices) do
+    for i = 1, #available_output_devices do
         if available_output_devices[i] == self.device_name then
             self.output_device = renoise.Midi.create_output_device(self.device_name)
             break

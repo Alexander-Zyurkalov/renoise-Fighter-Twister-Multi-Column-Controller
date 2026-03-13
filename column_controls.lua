@@ -119,7 +119,7 @@ function ColumnControls:rebuild()
     local num_visible_effect_columns = track.visible_effect_columns
 
     -- Assign first CC for cursor position control
-    if cc_index <= table.getn(self.available_ccs) then
+    if cc_index <= #self.available_ccs then
         local cc = self.available_ccs[cc_index]
         new_controls[cc] = {
             type = "cursor",
@@ -162,7 +162,7 @@ function ColumnControls:rebuild()
 
         -- Assign CCs for this note column's parameters
         for _, param_type in ipairs(column_params) do
-            if cc_index <= table.getn(self.available_ccs) then
+            if cc_index <= #self.available_ccs then
                 local cc = self.available_ccs[cc_index]
                 new_controls[cc] = {
                     type = param_type,
@@ -184,7 +184,7 @@ function ColumnControls:rebuild()
             end
         end
 
-        if cc_index > table.getn(self.available_ccs) then
+        if cc_index > #self.available_ccs then
             break
         end
     end
@@ -194,7 +194,7 @@ function ColumnControls:rebuild()
         local effect_params = { "effect_number_xx", "effect_number_yy", "effect_amount_x", "effect_amount_y" }
 
         for _, param_type in ipairs(effect_params) do
-            if cc_index <= table.getn(self.available_ccs) then
+            if cc_index <= #self.available_ccs then
                 local cc = self.available_ccs[cc_index]
                 new_controls[cc] = {
                     type = param_type,
@@ -216,7 +216,7 @@ function ColumnControls:rebuild()
             end
         end
 
-        if cc_index > table.getn(self.available_ccs) then
+        if cc_index > #self.available_ccs then
             break
         end
     end
@@ -226,7 +226,7 @@ function ColumnControls:rebuild()
     for _, automation_param in ipairs(all_automations) do
         local automation_params = { "automation_prev_scaling", "automation", "automation_scaling" }
         for _, param_type in ipairs(automation_params) do
-            if cc_index <= table.getn(self.available_ccs) then
+            if cc_index <= #self.available_ccs then
                 local cc = self.available_ccs[cc_index]
                 new_controls[cc] = {
                     type = param_type,
@@ -247,7 +247,7 @@ function ColumnControls:rebuild()
             end
         end
 
-        if cc_index > table.getn(self.available_ccs) then
+        if cc_index > #self.available_ccs then
             break
         end
     end
@@ -327,7 +327,7 @@ function ColumnControls:has_value_at_current_position(column_type, column_index,
         columns = current_line.note_columns
     end
 
-    if column_index > 0 and column_index <= table.getn(columns) then
+    if column_index > 0 and column_index <= #columns then
         local column = columns[column_index]
         local params = self.column_params[column_type]
 
@@ -369,7 +369,7 @@ function ColumnControls:get_current_column_value(column_type, column_index, is_e
         columns = current_line.note_columns
     end
 
-    if column_index > 0 and column_index <= table.getn(columns) then
+    if column_index > 0 and column_index <= #columns then
         local column = columns[column_index]
         local params = self.column_params[column_type]
 
